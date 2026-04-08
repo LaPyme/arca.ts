@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { WsfeVoucherInput } from "./wsfe";
 import { createWsfeService } from "./wsfe";
 
 function createBaseOptions() {
@@ -22,6 +23,28 @@ function createBaseOptions() {
     },
     auth,
     soap,
+  };
+}
+
+function createBaseVoucherInput(
+  overrides: Partial<WsfeVoucherInput> = {}
+): WsfeVoucherInput {
+  return {
+    salesPoint: 1,
+    voucherType: 6,
+    concept: 1,
+    documentType: 80,
+    documentNumber: 30717329654,
+    voucherDate: "20260501",
+    totalAmount: 121,
+    nonTaxableAmount: 0,
+    netAmount: 100,
+    exemptAmount: 0,
+    taxAmount: 0,
+    vatAmount: 21,
+    currencyId: "PES",
+    exchangeRate: 1,
+    ...overrides,
   };
 }
 
@@ -59,20 +82,17 @@ describe("createWsfeService", () => {
     const service = createWsfeService(options);
     const result = await service.createNextVoucher({
       representedTaxId: "20304050607",
-      data: {
-        PtoVta: 1,
-        CbteTipo: 6,
-        ImpTotal: 121,
-        CbtesAsoc: [{ Tipo: 1 }],
-        Tributos: [{ Id: 99 }],
-        Iva: [{ Id: 5 }],
-        Opcionales: [{ Id: 27 }],
-      },
+      data: createBaseVoucherInput({
+        associatedVouchers: [{ type: 1, salesPoint: 1, number: 1 }],
+        taxes: [{ id: 99, baseAmount: 100, rate: 10, amount: 10 }],
+        vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
+        optionalFields: [{ id: "27", value: "test" }],
+      }),
     });
 
     expect(result).toEqual({
-      CAE: "123456789",
-      CAEFchVto: "20260501",
+      cae: "123456789",
+      caeExpiry: "20260501",
       voucherNumber: 42,
       raw: {
         FeDetResp: {
@@ -113,22 +133,54 @@ describe("createWsfeService", () => {
               CbteDesde: 42,
               CbteHasta: 42,
               CbtesAsoc: {
-                CbteAsoc: [{ Tipo: 1 }],
+                CbteAsoc: [{ Tipo: 1, PtoVta: 1, Nro: 1 }],
               },
               Tributos: {
-                Tributo: [{ Id: 99 }],
+                Tributo: [{ Id: 99, BaseImp: 100, Alic: 10, Importe: 10 }],
               },
               Iva: {
-                AlicIva: [{ Id: 5 }],
+                AlicIva: [{ Id: 5, BaseImp: 100, Importe: 21 }],
               },
               Opcionales: {
-                Opcional: [{ Id: 27 }],
+                Opcional: [{ Id: "27", Valor: "test" }],
               },
             },
           },
         },
       },
     });
+  });
+
+  it("allows destructuring without breaking createNextVoucher", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockResolvedValueOnce({
+        result: {
+          FECompUltimoAutorizadoResponse: {
+            FECompUltimoAutorizadoResult: { CbteNro: 0 },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          FECAESolicitarResponse: {
+            FECAESolicitarResult: {
+              FeDetResp: {
+                FECAEDetResponse: [
+                  { Resultado: "A", CAE: "999", CAEFchVto: "20260601" },
+                ],
+              },
+            },
+          },
+        },
+      });
+
+    const { createNextVoucher } = createWsfeService(options);
+    const result = await createNextVoucher({
+      data: createBaseVoucherInput(),
+    });
+
+    expect(result.cae).toBe("999");
   });
 
   it("raises service errors for rejected vouchers and missing CAE data", async () => {
@@ -165,10 +217,7 @@ describe("createWsfeService", () => {
 
     await expect(
       createWsfeService(rejectedOptions).createNextVoucher({
-        data: {
-          PtoVta: 1,
-          CbteTipo: 6,
-        },
+        data: createBaseVoucherInput(),
       })
     ).rejects.toMatchObject({
       name: "ArcaServiceError",
@@ -203,10 +252,7 @@ describe("createWsfeService", () => {
 
     await expect(
       createWsfeService(missingCaeOptions).createNextVoucher({
-        data: {
-          PtoVta: 1,
-          CbteTipo: 6,
-        },
+        data: createBaseVoucherInput(),
       })
     ).rejects.toMatchObject({
       name: "ArcaServiceError",
@@ -233,7 +279,8 @@ describe("createWsfeService", () => {
           FECompConsultarResponse: {
             FECompConsultarResult: {
               ResultGet: {
-                CbteNro: 77,
+                CbteDesde: 77,
+                CbteHasta: 77,
                 Resultado: "A",
               },
             },
@@ -248,7 +295,36 @@ describe("createWsfeService", () => {
         representedTaxId: "20304050607",
         forceAuthRefresh: true,
       })
-    ).resolves.toEqual([{ Nro: 1 }, { Nro: 2 }]);
+    ).resolves.toEqual([{ number: 1 }, { number: 2 }]);
+
+    const singlePointOptions = createBaseOptions();
+    singlePointOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FEParamGetPtosVentaResponse: {
+          FEParamGetPtosVentaResult: {
+            ResultGet: {
+              PtoVenta: {
+                Nro: "1",
+                EmisionTipo: "CAE - Monotributo",
+                Bloqueado: "N",
+                FchBaja: "NULL",
+              },
+            },
+          },
+        },
+      },
+    });
+    await expect(
+      createWsfeService(singlePointOptions).getSalesPoints({})
+    ).resolves.toEqual([
+      {
+        number: 1,
+        emissionType: "CAE - Monotributo",
+        blocked: "N",
+        deletedSince: "NULL",
+      },
+    ]);
+
     await expect(
       service.getVoucherInfo({
         representedTaxId: "20304050607",
@@ -257,8 +333,13 @@ describe("createWsfeService", () => {
         voucherType: 6,
       })
     ).resolves.toEqual({
-      CbteNro: 77,
-      Resultado: "A",
+      voucherNumber: 77,
+      result: "A",
+      raw: {
+        CbteDesde: 77,
+        CbteHasta: 77,
+        Resultado: "A",
+      },
     });
   });
 

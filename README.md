@@ -88,29 +88,65 @@ Environment-based configuration also supports:
 
 ## Supported Modules
 
-- `client.wsfe`
-  - `createNextVoucher`
-  - `getLastVoucher`
-  - `getSalesPoints`
-  - `getVoucherInfo`
-- `client.wsmtxca`
-  - `authorizeVoucher`
-  - `getLastAuthorizedVoucher`
-  - `getVoucher`
-- `client.padron`
-  - `getTaxpayerDetails`
-  - `getTaxIdByDocument`
+### `client.wsfe`
+
+WSFE electronic invoicing. All inputs and outputs use JS-convention names; the library maps them to AFIP's SOAP schema internally.
+
+- `createNextVoucher({ data })` — Authorizes a new voucher. Takes a typed `WsfeVoucherInput` and returns `WsfeAuthorizationResult` with `cae`, `caeExpiry`, `voucherNumber`, and `raw`.
+- `getLastVoucher({ salesPoint, voucherType })` — Returns the next available voucher number.
+- `getSalesPoints({})` — Lists configured points of sale as `WsfeSalesPoint[]`.
+- `getVoucherInfo({ number, salesPoint, voucherType })` — Retrieves voucher details as `WsfeVoucherInfo | null`.
+
+```ts
+const result = await client.wsfe.createNextVoucher({
+  data: {
+    salesPoint: 1,
+    voucherType: 6,
+    concept: 1,
+    documentType: 80,
+    documentNumber: 30717329654,
+    voucherDate: "20260501",
+    totalAmount: 121,
+    nonTaxableAmount: 0,
+    netAmount: 100,
+    exemptAmount: 0,
+    taxAmount: 0,
+    vatAmount: 21,
+    currencyId: "PES",
+    exchangeRate: 1,
+    vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
+  },
+});
+
+console.log(result.cae, result.caeExpiry, result.voucherNumber);
+```
+
+### `client.wsmtxca`
+
+WSMTXCA electronic invoicing (Factura de Crédito Electrónica).
+
+- `authorizeVoucher({ data })` — Returns `WsmtxcaAuthorizationResult`.
+- `getLastAuthorizedVoucher({ voucherType, salesPoint })` — Returns `WsmtxcaLastAuthorizedVoucherResult`.
+- `getVoucher({ voucherType, salesPoint, voucherNumber })` — Returns `WsmtxcaVoucherLookupResult`.
+
+### `client.padron`
+
+Padron taxpayer registry lookups.
+
+- `getTaxpayerDetails(taxId)` — Returns `PadronTaxpayerResult | null` with `taxId`, `name`, `personType`, and `raw`.
+- `getTaxIdByDocument(documentNumber)` — Returns `PadronTaxIdLookupResult | null` with `taxIds` and `raw`.
 
 You can also import the service factories directly from documented subpaths:
 
 ```ts
 import { createWsfeService } from "@lapyme/arca/wsfe";
 import { ArcaServiceError } from "@lapyme/arca/errors";
+import type { WsfeVoucherInput } from "@lapyme/arca/wsfe";
 ```
 
 ## Public API
 
-Documented, semver-governed entrypoints for `0.1.x`:
+Documented, semver-governed entrypoints:
 
 - `@lapyme/arca`
 - `@lapyme/arca/wsfe`

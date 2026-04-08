@@ -7,7 +7,10 @@ import type {
   ArcaWsaaCacheConfig,
 } from "./internal/types";
 
+/** Valid ARCA environment names. */
 export const ARCA_ENVIRONMENTS = ["production", "test"] as const;
+
+/** Default environment variable names read by {@link createArcaClientConfigFromEnv}. */
 export const ARCA_ENV_VARIABLES = {
   taxId: "ARCA_TAX_ID",
   certificatePem: "ARCA_CERTIFICATE_PEM",
@@ -18,7 +21,8 @@ export const ARCA_ENV_VARIABLES = {
 } as const;
 
 type ArcaClientConfigEnvironment = Record<string, string | undefined>;
-type CreateArcaClientConfigFromEnvOptions = {
+/** Options for {@link createArcaClientConfigFromEnv}. */
+export type CreateArcaClientConfigFromEnvOptions = {
   env?: ArcaClientConfigEnvironment;
   defaultEnvironment?: ArcaEnvironment;
   variableNames?: Partial<typeof ARCA_ENV_VARIABLES>;
@@ -30,10 +34,17 @@ const PRIVATE_KEY_PEM_PREFIXES = [
   "-----BEGIN ENCRYPTED PRIVATE KEY-----",
 ] as const;
 
+/** Returns `"production"` or `"test"` based on the boolean flag. */
 export function resolveArcaEnvironment(production: boolean): ArcaEnvironment {
   return production ? "production" : "test";
 }
 
+/**
+ * Builds an {@link ArcaClientConfig} from environment variables.
+ * Reads `process.env` by default; override with `options.env`.
+ *
+ * @throws {ArcaConfigurationError} When required variables are missing or invalid.
+ */
 export function createArcaClientConfigFromEnv(
   options: CreateArcaClientConfigFromEnvOptions = {}
 ): ArcaClientConfig {
@@ -77,6 +88,11 @@ export function createArcaClientConfigFromEnv(
   return normalizeArcaClientConfig(config);
 }
 
+/**
+ * Validates an {@link ArcaClientConfig} and throws if any field is invalid.
+ *
+ * @throws {ArcaConfigurationError} With a list of invalid field names.
+ */
 export function assertArcaClientConfig(config: ArcaClientConfig): void {
   const invalidFields: string[] = [];
   const normalized = normalizeArcaClientConfig(config);

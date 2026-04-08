@@ -102,7 +102,7 @@ describe("createWsmtxcaService", () => {
     await expect(
       service.getLastAuthorizedVoucher({
         voucherType: 1,
-        pointOfSaleNumber: 4,
+        salesPoint: 4,
       })
     ).resolves.toEqual({
       voucherNumber: 4,
@@ -147,7 +147,7 @@ describe("createWsmtxcaService", () => {
       service.getVoucher({
         representedTaxId: "20304050607",
         voucherType: 6,
-        pointOfSaleNumber: 8,
+        salesPoint: 8,
         voucherNumber: 25,
       })
     ).resolves.toEqual({
@@ -241,23 +241,23 @@ describe("createWsmtxcaService", () => {
     await expect(
       service.getLastAuthorizedVoucher({
         voucherType: 1,
-        pointOfSaleNumber: 4,
+        salesPoint: 4,
       })
     ).rejects.toMatchObject({
       name: "ArcaServiceError",
-      message: "WSMTXCA no devolvió el último número de comprobante autorizado",
+      message: "WSMTXCA did not return the last authorized voucher number",
     });
 
     await expect(
       service.getVoucher({
         voucherType: 6,
-        pointOfSaleNumber: 8,
+        salesPoint: 8,
         voucherNumber: 25,
       })
     ).rejects.toMatchObject({
       name: "ArcaServiceError",
       message:
-        "WSMTXCA no devolvió la fecha de emisión del comprobante asociado",
+        "WSMTXCA did not return the voucher issue date",
     });
   });
 });

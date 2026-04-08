@@ -6,6 +6,7 @@ import type {
 } from "../internal/types";
 import type { WsaaAuthModule } from "../wsaa";
 
+/** Result of a successful WSMTXCA voucher authorization. */
 export type WsmtxcaAuthorizationResult = {
   cae: string;
   caeExpiry?: string;
@@ -14,11 +15,13 @@ export type WsmtxcaAuthorizationResult = {
   raw: Record<string, unknown>;
 };
 
+/** Result of querying the last authorized voucher number. */
 export type WsmtxcaLastAuthorizedVoucherResult = {
   voucherNumber: number;
   raw: Record<string, unknown>;
 };
 
+/** Result of looking up a specific WSMTXCA voucher. */
 export type WsmtxcaVoucherLookupResult = {
   invoiceDate: string;
   voucher: Record<string, unknown>;
@@ -26,20 +29,24 @@ export type WsmtxcaVoucherLookupResult = {
   raw: Record<string, unknown>;
 };
 
+/** WSMTXCA electronic invoicing service (Factura de Crédito Electrónica). */
 export type WsmtxcaService = {
+  /** Authorizes a voucher and returns the CAE. */
   authorizeVoucher(input: {
     representedTaxId?: ArcaRepresentedTaxId;
     data: Record<string, unknown>;
   }): Promise<WsmtxcaAuthorizationResult>;
+  /** Returns the last authorized voucher number for the given sales point and type. */
   getLastAuthorizedVoucher(input: {
     representedTaxId?: ArcaRepresentedTaxId;
     voucherType: number;
-    pointOfSaleNumber: number;
+    salesPoint: number;
   }): Promise<WsmtxcaLastAuthorizedVoucherResult>;
+  /** Retrieves details for a specific voucher. */
   getVoucher(input: {
     representedTaxId?: ArcaRepresentedTaxId;
     voucherType: number;
-    pointOfSaleNumber: number;
+    salesPoint: number;
     voucherNumber: number;
   }): Promise<WsmtxcaVoucherLookupResult>;
 };
@@ -50,6 +57,7 @@ export type CreateWsmtxcaServiceOptions = {
   soap: SoapTransport;
 };
 
+/** Creates a WSMTXCA service instance wired with authentication and SOAP transport. */
 export function createWsmtxcaService(
   options: CreateWsmtxcaServiceOptions
 ): WsmtxcaService {
@@ -90,7 +98,7 @@ export function createWsmtxcaService(
       if (resultado === "R" || caeValue == null) {
         throw new ArcaServiceError(
           messages.join(" | ") ||
-            "WSMTXCA rechazó la autorización del comprobante",
+            "WSMTXCA rejected the voucher authorization",
           { detail: raw }
         );
       }
@@ -104,7 +112,7 @@ export function createWsmtxcaService(
         ),
         voucherNumber: parseWsmtxcaVoucherNumber(
           authorizationPayload.numeroComprobante ?? raw.numeroComprobante,
-          "WSMTXCA no devolvió el número del comprobante autorizado",
+          "WSMTXCA did not return the authorized voucher number",
           raw
         ),
         messages,
@@ -114,7 +122,7 @@ export function createWsmtxcaService(
     async getLastAuthorizedVoucher({
       representedTaxId,
       voucherType,
-      pointOfSaleNumber,
+      salesPoint,
     }) {
       const auth = await options.auth.login("wsmtxca", { representedTaxId });
       const response = await options.soap.execute<
@@ -133,7 +141,7 @@ export function createWsmtxcaService(
           ),
           consultaUltimoComprobanteAutorizadoRequest: {
             codigoTipoComprobante: voucherType,
-            numeroPuntoVenta: pointOfSaleNumber,
+            numeroPuntoVenta: salesPoint,
           },
         },
       });
@@ -146,7 +154,7 @@ export function createWsmtxcaService(
         voucherNumber: parseWsmtxcaVoucherNumber(
           raw.numeroComprobante ?? raw.cbteNro ?? raw.nroComprobante,
           extractWsmtxcaMessages(raw).join(" | ") ||
-            "WSMTXCA no devolvió el último número de comprobante autorizado",
+            "WSMTXCA did not return the last authorized voucher number",
           raw
         ),
         raw,
@@ -155,7 +163,7 @@ export function createWsmtxcaService(
     async getVoucher({
       representedTaxId,
       voucherType,
-      pointOfSaleNumber,
+      salesPoint,
       voucherNumber,
     }) {
       const auth = await options.auth.login("wsmtxca", { representedTaxId });
@@ -175,7 +183,7 @@ export function createWsmtxcaService(
           ),
           consultaComprobanteRequest: {
             codigoTipoComprobante: voucherType,
-            numeroPuntoVenta: pointOfSaleNumber,
+            numeroPuntoVenta: salesPoint,
             numeroComprobante: voucherNumber,
           },
         },
@@ -194,7 +202,7 @@ export function createWsmtxcaService(
       if (!invoiceDate) {
         throw new ArcaServiceError(
           messages[0] ??
-            "WSMTXCA no devolvió la fecha de emisión del comprobante asociado",
+            "WSMTXCA did not return the voucher issue date",
           { detail: raw }
         );
       }
@@ -308,7 +316,7 @@ function extractWsmtxcaMessages(raw: Record<string, unknown>): string[] {
     const code = entry.codigo == null ? "N/A" : String(entry.codigo);
     const description =
       entry.descripcion == null
-        ? "Error desconocido en WSMTXCA"
+        ? "Unknown WSMTXCA error"
         : String(entry.descripcion);
     return `Error ${code}: ${description}`;
   });

@@ -30,13 +30,26 @@ describe("createPadronService", () => {
       result: {
         personaReturn: {
           idPersona: "20123456789",
+          tipoPersona: "JURIDICA",
+          datosGenerales: {
+            razonSocial: "Mi Empresa SRL",
+          },
         },
       },
     });
 
     const service = createPadronService(options);
     await expect(service.getTaxpayerDetails(20_123_456_789)).resolves.toEqual({
-      idPersona: "20123456789",
+      taxId: "20123456789",
+      personType: "JURIDICA",
+      name: "Mi Empresa SRL",
+      raw: {
+        idPersona: "20123456789",
+        tipoPersona: "JURIDICA",
+        datosGenerales: {
+          razonSocial: "Mi Empresa SRL",
+        },
+      },
     });
 
     expect(options.auth.login).toHaveBeenCalledWith(
@@ -66,10 +79,12 @@ describe("createPadronService", () => {
     });
 
     const service = createPadronService(options);
-    await expect(service.getTaxIdByDocument(12_345_678)).resolves.toEqual([
-      "20123456789",
-      "20999888777",
-    ]);
+    await expect(service.getTaxIdByDocument(12_345_678)).resolves.toEqual({
+      taxIds: ["20123456789", "20999888777"],
+      raw: {
+        idPersona: ["20123456789", "20999888777"],
+      },
+    });
 
     expect(options.auth.login).toHaveBeenCalledWith("ws_sr_padron_a13");
   });

@@ -1,3 +1,4 @@
+/** Base error class for all ARCA-related errors. */
 export class ArcaError extends Error {
   readonly code: string;
   override readonly name: string = "ArcaError";
@@ -8,6 +9,7 @@ export class ArcaError extends Error {
   }
 }
 
+/** Thrown when the ARCA client configuration is missing or invalid. */
 export class ArcaConfigurationError extends ArcaError {
   override readonly name: string = "ArcaConfigurationError";
 
@@ -16,7 +18,7 @@ export class ArcaConfigurationError extends ArcaError {
   }
 }
 
-export class ArcaNotImplementedError extends ArcaError {
+class ArcaNotImplementedError extends ArcaError {
   override readonly name: string = "ArcaNotImplementedError";
 
   constructor(message: string, options?: ErrorOptions) {
@@ -24,6 +26,7 @@ export class ArcaNotImplementedError extends ArcaError {
   }
 }
 
+/** Thrown when an HTTP request to an ARCA endpoint fails at the transport level. */
 export class ArcaTransportError extends ArcaError {
   override readonly name: string = "ArcaTransportError";
   readonly statusCode?: number;
@@ -42,6 +45,7 @@ export class ArcaTransportError extends ArcaError {
   }
 }
 
+/** Thrown when the SOAP response contains a Fault element. */
 export class ArcaSoapFaultError extends ArcaError {
   override readonly name: string = "ArcaSoapFaultError";
   readonly faultCode?: string;
@@ -60,6 +64,7 @@ export class ArcaSoapFaultError extends ArcaError {
   }
 }
 
+/** Thrown when an ARCA service (WSFE, WSMTXCA, Padron) returns a domain-level error. */
 export class ArcaServiceError extends ArcaError {
   override readonly name: string = "ArcaServiceError";
   readonly serviceCode?: string | number;

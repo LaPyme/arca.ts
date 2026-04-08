@@ -6,9 +6,30 @@ import type {
 } from "../internal/types";
 import type { WsaaAuthModule } from "../wsaa";
 
+/** Result of a taxpayer lookup via Padron A5. */
+export type PadronTaxpayerResult = {
+  taxId: string;
+  personType?: string;
+  name?: string;
+  raw: Record<string, unknown>;
+};
+
+/** Result of a tax ID lookup by document number via Padron A13. */
+export type PadronTaxIdLookupResult = {
+  taxIds: string[];
+  raw: Record<string, unknown>;
+};
+
+/** Padron taxpayer registry service. */
 export type PadronService = {
-  getTaxpayerDetails(taxId: number | string): Promise<unknown>;
-  getTaxIdByDocument(documentNumber: number | string): Promise<unknown>;
+  /** Looks up taxpayer details by CUIT. Returns `null` if the taxpayer does not exist. */
+  getTaxpayerDetails(
+    taxId: number | string
+  ): Promise<PadronTaxpayerResult | null>;
+  /** Looks up CUITs associated with a document number. Returns `null` if not found. */
+  getTaxIdByDocument(
+    documentNumber: number | string
+  ): Promise<PadronTaxIdLookupResult | null>;
 };
 
 export type CreatePadronServiceOptions = {
@@ -17,12 +38,13 @@ export type CreatePadronServiceOptions = {
   soap: SoapTransport;
 };
 
+/** Creates a Padron service instance wired with authentication and SOAP transport. */
 export function createPadronService(
   options: CreatePadronServiceOptions
 ): PadronService {
   return {
     async getTaxpayerDetails(taxId) {
-      return await executePadronOperation(
+      const raw = await executePadronOperation(
         options,
         "padron-a5",
         "getPersona_v2",
@@ -30,9 +52,26 @@ export function createPadronService(
           idPersona: Number.parseInt(String(taxId), 10),
         }
       );
+      if (!raw) {
+        return null;
+      }
+      const record = raw as Record<string, unknown>;
+      const datosGenerales = record.datosGenerales as
+        | Record<string, unknown>
+        | undefined;
+      return {
+        taxId: String(record.idPersona ?? ""),
+        ...(record.tipoPersona !== undefined
+          ? { personType: String(record.tipoPersona) }
+          : {}),
+        ...(datosGenerales
+          ? { name: extractPadronName(datosGenerales) }
+          : {}),
+        raw: record,
+      };
     },
     async getTaxIdByDocument(documentNumber) {
-      const result = await executePadronOperation(
+      const raw = await executePadronOperation(
         options,
         "padron-a13",
         "getIdPersonaListByDocumento",
@@ -40,9 +79,42 @@ export function createPadronService(
           documento: String(documentNumber),
         }
       );
-      return (result as Record<string, unknown>)?.idPersona ?? result;
+      if (!raw) {
+        return null;
+      }
+      const record = raw as Record<string, unknown>;
+      const idPersona = record.idPersona;
+      const taxIds = Array.isArray(idPersona)
+        ? idPersona.map(String)
+        : idPersona !== undefined
+          ? [String(idPersona)]
+          : [];
+      return {
+        taxIds,
+        raw: record,
+      };
     },
   };
+}
+
+function extractPadronName(
+  datosGenerales: Record<string, unknown>
+): string | undefined {
+  if (typeof datosGenerales.razonSocial === "string") {
+    return datosGenerales.razonSocial;
+  }
+  const nombre = datosGenerales.nombre;
+  const apellido = datosGenerales.apellido;
+  if (typeof apellido === "string" && typeof nombre === "string") {
+    return `${apellido} ${nombre}`.trim();
+  }
+  if (typeof apellido === "string") {
+    return apellido;
+  }
+  if (typeof nombre === "string") {
+    return nombre;
+  }
+  return undefined;
 }
 
 async function executePadronOperation(
