@@ -1,0 +1,88 @@
+{
+  "name": "@lapyme/arca",
+  "version": "0.0.0",
+  "description": "Node.js client for ARCA services including WSFE, WSMTXCA, and padron lookups.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Lapyme",
+  "homepage": "https://github.com/LaPyme/arcats#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LaPyme/arcats.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LaPyme/arcats/issues"
+  },
+  "keywords": [
+    "arca",
+    "afip",
+    "argentina",
+    "wsaa",
+    "wsfe",
+    "wsmtxca",
+    "padron",
+    "facturacion-electronica"
+  ],
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "pack:check": "npm pack --dry-run",
+    "prepack": "pnpm build",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./wsfe": {
+      "types": "./dist/wsfe.d.ts",
+      "import": "./dist/wsfe.js"
+    },
+    "./wsmtxca": {
+      "types": "./dist/wsmtxca.d.ts",
+      "import": "./dist/wsmtxca.js"
+    },
+    "./padron": {
+      "types": "./dist/padron.d.ts",
+      "import": "./dist/padron.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.3",
+    "node-forge": "^1.3.1"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
+    "@types/node": "^25.0.8",
+    "@types/node-forge": "^1.3.14",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
