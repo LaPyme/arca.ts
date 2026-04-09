@@ -93,10 +93,13 @@ export function createWsaaAuthModule(
         ) {
           const cached = getCachedCredentials(cache, cacheKey);
           if (cached) {
-            options.logger?.warn("Recovered WSAA coe.alreadyAuthenticated fault", {
-              service,
-              faultCode: error.faultCode,
-            });
+            options.logger?.warn(
+              "Recovered WSAA coe.alreadyAuthenticated fault",
+              {
+                service,
+                faultCode: error.faultCode,
+              }
+            );
             return cached;
           }
         }

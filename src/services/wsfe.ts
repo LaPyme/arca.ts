@@ -191,10 +191,7 @@ export type WsfeService = {
     forceAuthRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
   /** Reports WSFE backend status without requiring taxpayer authorization. */
-  getServerStatus(input?: {
-    representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
-  }): Promise<WsfeServerStatus>;
+  getServerStatus(): Promise<WsfeServerStatus>;
   /** Returns the exchange rate for a given currency. */
   getQuotation(input: {
     currencyId: string;
@@ -401,8 +398,9 @@ export function createWsfeService(
           forceAuthRefresh,
         }
       );
-      const rawPoints = (result.ResultGet as Record<string, unknown> | undefined)
-        ?.PtoVenta;
+      const rawPoints = (
+        result.ResultGet as Record<string, unknown> | undefined
+      )?.PtoVenta;
       if (!rawPoints) {
         return [];
       }
@@ -441,11 +439,7 @@ export function createWsfeService(
       const result = await executeWsfeOperation("FEDummy");
       return mapWsfeServerStatus(result);
     },
-    async getQuotation({
-      currencyId,
-      representedTaxId,
-      forceAuthRefresh,
-    }) {
+    async getQuotation({ currencyId, representedTaxId, forceAuthRefresh }) {
       const result = await executeWsfeAuthenticatedOperation(
         "FEParamGetCotizacion",
         {
@@ -456,7 +450,8 @@ export function createWsfeService(
           MonId: currencyId,
         }
       );
-      const raw = (result.ResultGet as Record<string, unknown> | undefined) ?? {};
+      const raw =
+        (result.ResultGet as Record<string, unknown> | undefined) ?? {};
       return mapWsfeQuotation(raw);
     },
     async getVoucherInfo({
@@ -877,9 +872,9 @@ function getWsfeResultEntries(
   result: Record<string, unknown>,
   key: string
 ): Record<string, unknown>[] {
-  const rawEntries = (result.ResultGet as Record<string, unknown> | undefined)?.[
-    key
-  ];
+  const rawEntries = (
+    result.ResultGet as Record<string, unknown> | undefined
+  )?.[key];
   if (!rawEntries) {
     return [];
   }

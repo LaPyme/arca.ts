@@ -32,11 +32,7 @@ export type ArcaLogLevel = "debug" | "info" | "warn" | "error";
 export type ArcaLoggerConfig = {
   disabled?: boolean;
   level?: ArcaLogLevel;
-  log?: (
-    level: ArcaLogLevel,
-    message: string,
-    ...args: unknown[]
-  ) => void;
+  log?: (level: ArcaLogLevel, message: string, ...args: unknown[]) => void;
 };
 
 /** Configuration required to create an ARCA client. */

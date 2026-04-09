@@ -548,47 +548,50 @@ describe("createWsfeService", () => {
       rawEntry: { Id: "27", Desc: "Referencia comercial" },
       expected: [{ id: 27, description: "Referencia comercial" }],
     },
-  ])(
-    "retrieves %s",
-    async ({ method, operation, resultKey, rawEntry, expected }) => {
-      const options = createBaseOptions();
-      options.soap.execute.mockResolvedValueOnce(
-        createWsfeOperationResult(operation, {
-          ResultGet: {
-            [resultKey]: rawEntry,
-          },
-        })
-      );
-
-      const service = createWsfeService(options);
-      const execute = service[method as keyof typeof service] as (input: {
-        representedTaxId?: number | string;
-        forceAuthRefresh?: boolean;
-      }) => Promise<unknown>;
-
-      await expect(
-        execute({
-          representedTaxId: "20304050607",
-          forceAuthRefresh: true,
-        })
-      ).resolves.toEqual(expected);
-      expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
-        representedTaxId: "20304050607",
-        forceRefresh: true,
-      });
-      expect(options.soap.execute).toHaveBeenCalledWith({
-        service: "wsfe",
-        operation,
-        body: {
-          Auth: {
-            Token: "token",
-            Sign: "sign",
-            Cuit: 20_304_050_607,
-          },
+  ])("retrieves %s", async ({
+    method,
+    operation,
+    resultKey,
+    rawEntry,
+    expected,
+  }) => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult(operation, {
+        ResultGet: {
+          [resultKey]: rawEntry,
         },
-      });
-    }
-  );
+      })
+    );
+
+    const service = createWsfeService(options);
+    const execute = service[method as keyof typeof service] as (input: {
+      representedTaxId?: number | string;
+      forceAuthRefresh?: boolean;
+    }) => Promise<unknown>;
+
+    await expect(
+      execute({
+        representedTaxId: "20304050607",
+        forceAuthRefresh: true,
+      })
+    ).resolves.toEqual(expected);
+    expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+    });
+    expect(options.soap.execute).toHaveBeenCalledWith({
+      service: "wsfe",
+      operation,
+      body: {
+        Auth: {
+          Token: "token",
+          Sign: "sign",
+          Cuit: 20_304_050_607,
+        },
+      },
+    });
+  });
 
   it("retrieves currency types", async () => {
     const options = createBaseOptions();
@@ -649,12 +652,7 @@ describe("createWsfeService", () => {
 
     const service = createWsfeService(options);
 
-    await expect(
-      service.getServerStatus({
-        representedTaxId: "20304050607",
-        forceAuthRefresh: true,
-      })
-    ).resolves.toEqual({
+    await expect(service.getServerStatus()).resolves.toEqual({
       appServer: "OK",
       dbServer: "OK",
       authServer: "OK",

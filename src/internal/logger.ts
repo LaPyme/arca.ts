@@ -1,4 +1,4 @@
-import type { ArcaLogLevel, ArcaLoggerConfig } from "./types";
+import type { ArcaLoggerConfig, ArcaLogLevel } from "./types";
 
 const ARCA_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 
@@ -17,7 +17,11 @@ export function createArcaLogger(config?: ArcaLoggerConfig): ArcaLogger {
   const level = resolveArcaLogLevel(config?.level);
   const sink = config?.log ?? defaultArcaLog;
 
-  const log = (messageLevel: ArcaLogLevel, message: string, ...args: unknown[]) => {
+  const log = (
+    messageLevel: ArcaLogLevel,
+    message: string,
+    ...args: unknown[]
+  ) => {
     if (disabled || !shouldLog(level, messageLevel)) {
       return;
     }

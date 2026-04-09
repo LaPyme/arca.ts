@@ -82,7 +82,8 @@ export function createSoapTransport(
         });
 
         const soapBody = parseSoapBody(responseXml);
-        const [, result] = getSingleBodyEntry<Record<string, unknown>>(soapBody);
+        const [, result] =
+          getSingleBodyEntry<Record<string, unknown>>(soapBody);
 
         return {
           service: request.service,

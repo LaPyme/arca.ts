@@ -300,11 +300,11 @@ describe("postXml", () => {
       url: "https://example.com/ws",
       body: "<request />",
       contentType: 'text/xml; charset="utf-8"',
-      timeout: 1_234,
+      timeout: 1234,
     }).catch((caughtError) => caughtError);
 
     expect(error).toBeInstanceOf(ArcaTransportError);
-    expect(capturedTimeoutMs).toEqual([1_234]);
+    expect(capturedTimeoutMs).toEqual([1234]);
     assert.match(
       (error as ArcaTransportError).message,
       /ARCA HTTP request timed out after 1234ms/

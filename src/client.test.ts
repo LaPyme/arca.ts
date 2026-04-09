@@ -136,9 +136,10 @@ describe("createArcaClient", () => {
     };
 
     const actualSoap = await vi.importActual<typeof import("./soap")>("./soap");
-    const actualWsfe = await vi.importActual<typeof import("./services/wsfe")>(
-      "./services/wsfe"
-    );
+    const actualWsfe =
+      await vi.importActual<typeof import("./services/wsfe")>(
+        "./services/wsfe"
+      );
     const auth = {
       login: vi.fn().mockResolvedValue({
         token: "token",
