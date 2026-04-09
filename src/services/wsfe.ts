@@ -48,6 +48,7 @@ export type WsfeVoucherInput = {
   concept: number;
   documentType: number;
   documentNumber: number;
+  receiverVatConditionId?: number;
   voucherDate: string;
   totalAmount: number;
   nonTaxableAmount: number;
@@ -323,6 +324,10 @@ function mapWsfeVoucherInput(
     PtoVta: input.salesPoint,
     CbteTipo: input.voucherType,
   };
+
+  if (input.receiverVatConditionId !== undefined) {
+    data.CondicionIVAReceptorId = input.receiverVatConditionId;
+  }
 
   if (input.serviceStartDate !== undefined) {
     data.FchServDesde = input.serviceStartDate;

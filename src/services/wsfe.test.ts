@@ -35,6 +35,7 @@ function createBaseVoucherInput(
     concept: 1,
     documentType: 80,
     documentNumber: 30717329654,
+    receiverVatConditionId: 5,
     voucherDate: "20260501",
     totalAmount: 121,
     nonTaxableAmount: 0,
@@ -132,6 +133,7 @@ describe("createWsfeService", () => {
             FECAEDetRequest: {
               CbteDesde: 42,
               CbteHasta: 42,
+              CondicionIVAReceptorId: 5,
               CbtesAsoc: {
                 CbteAsoc: [{ Tipo: 1, PtoVta: 1, Nro: 1 }],
               },
