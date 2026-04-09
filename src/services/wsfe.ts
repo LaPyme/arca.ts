@@ -1,5 +1,5 @@
 import { ArcaInputError, ArcaServiceError } from "../errors";
-import type { ArcaClientConfig } from "../internal/types";
+import type { ArcaClientConfig, ArcaRepresentedTaxId } from "../internal/types";
 import type { SoapTransport } from "../soap";
 import type { WsaaAuthModule } from "../wsaa";
 
@@ -102,6 +102,30 @@ export type WsfeVoucherInfo = {
   raw: Record<string, unknown>;
 };
 
+export type WsfeCatalogEntry = {
+  id: number;
+  description: string;
+};
+
+export type WsfeCurrencyType = {
+  id: string;
+  description: string;
+  validFrom: string;
+  validTo: string;
+};
+
+export type WsfeServerStatus = {
+  appServer: string;
+  dbServer: string;
+  authServer: string;
+};
+
+export type WsfeQuotation = {
+  currencyId: string;
+  rate: number;
+  date: string;
+};
+
 /** WSFE electronic invoicing service. */
 export type WsfeService = {
   /** Authorizes a new voucher by fetching the next number and requesting a CAE. */
@@ -131,6 +155,52 @@ export type WsfeService = {
     representedTaxId?: number | string;
     forceAuthRefresh?: boolean;
   }): Promise<WsfeSalesPoint[]>;
+  /** Lists voucher types accepted by WSFE. */
+  getVoucherTypes(input: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeCatalogEntry[]>;
+  /** Lists document types accepted by WSFE. */
+  getDocumentTypes(input: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeCatalogEntry[]>;
+  /** Lists concept types accepted by WSFE. */
+  getConceptTypes(input: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeCatalogEntry[]>;
+  /** Lists supported currency types. */
+  getCurrencyTypes(input: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeCurrencyType[]>;
+  /** Lists VAT rates accepted by WSFE. */
+  getVatRates(input: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeCatalogEntry[]>;
+  /** Lists tax types accepted by WSFE. */
+  getTaxTypes(input: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeCatalogEntry[]>;
+  /** Lists optional field types accepted by WSFE. */
+  getOptionalTypes(input: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeCatalogEntry[]>;
+  /** Reports WSFE backend status without requiring taxpayer authorization. */
+  getServerStatus(input?: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeServerStatus>;
+  /** Returns the exchange rate for a given currency. */
+  getQuotation(input: {
+    currencyId: string;
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeQuotation>;
   /** Retrieves details for a specific voucher. Returns `null` if not found. */
   getVoucherInfo(input: {
     representedTaxId?: number | string;
@@ -172,6 +242,53 @@ type NormalizedWsfeVoucherInput = Omit<
 export function createWsfeService(
   options: CreateWsfeServiceOptions
 ): WsfeService {
+  async function executeWsfeAuthenticatedOperation(
+    operation: string,
+    input: {
+      representedTaxId?: ArcaRepresentedTaxId;
+      forceAuthRefresh?: boolean;
+    },
+    body: Record<string, unknown> = {}
+  ) {
+    const auth = await options.auth.login("wsfe", {
+      representedTaxId: input.representedTaxId,
+      forceRefresh: input.forceAuthRefresh,
+    });
+    const response = await options.soap.execute<
+      Record<string, unknown>,
+      Record<string, unknown>
+    >({
+      service: "wsfe",
+      operation,
+      body: {
+        Auth: createWsfeAuth(
+          input.representedTaxId ?? options.config.taxId,
+          auth.token,
+          auth.sign
+        ),
+        ...body,
+      },
+    });
+
+    return unwrapWsfeOperationResult(operation, response.result);
+  }
+
+  async function executeWsfeOperation(
+    operation: string,
+    body: Record<string, unknown> = {}
+  ) {
+    const response = await options.soap.execute<
+      Record<string, unknown>,
+      Record<string, unknown>
+    >({
+      service: "wsfe",
+      operation,
+      body,
+    });
+
+    return unwrapWsfeOperationResult(operation, response.result);
+  }
+
   async function getNextVoucherNumber({
     representedTaxId,
     salesPoint,
@@ -183,31 +300,33 @@ export function createWsfeService(
     voucherType: number;
     forceAuthRefresh?: boolean;
   }) {
-    const auth = await options.auth.login("wsfe", {
-      representedTaxId,
-      forceRefresh: forceAuthRefresh,
-    });
-    const response = await options.soap.execute<
-      Record<string, unknown>,
-      Record<string, unknown>
-    >({
-      service: "wsfe",
-      operation: "FECompUltimoAutorizado",
-      body: {
-        Auth: createWsfeAuth(
-          representedTaxId ?? options.config.taxId,
-          auth.token,
-          auth.sign
-        ),
+    const result = await executeWsfeAuthenticatedOperation(
+      "FECompUltimoAutorizado",
+      {
+        representedTaxId,
+        forceAuthRefresh,
+      },
+      {
         PtoVta: salesPoint,
         CbteTipo: voucherType,
-      },
-    });
-    const result = unwrapWsfeOperationResult(
-      "FECompUltimoAutorizado",
-      response.result
+      }
     );
     return Number(result.CbteNro ?? 0) + 1;
+  }
+
+  async function getWsfeCatalog(
+    operation: string,
+    resultKey: string,
+    input: {
+      representedTaxId?: ArcaRepresentedTaxId;
+      forceAuthRefresh?: boolean;
+    }
+  ): Promise<WsfeCatalogEntry[]> {
+    const result = await executeWsfeAuthenticatedOperation(operation, {
+      representedTaxId: input.representedTaxId,
+      forceAuthRefresh: input.forceAuthRefresh,
+    });
+    return getWsfeResultEntries(result, resultKey).map(mapWsfeCatalogEntry);
   }
 
   return {
@@ -275,35 +394,70 @@ export function createWsfeService(
       return getNextVoucherNumber(input);
     },
     async getSalesPoints({ representedTaxId, forceAuthRefresh }) {
-      const auth = await options.auth.login("wsfe", {
-        representedTaxId,
-        forceRefresh: forceAuthRefresh,
-      });
-      const response = await options.soap.execute<
-        Record<string, unknown>,
-        Record<string, unknown>
-      >({
-        service: "wsfe",
-        operation: "FEParamGetPtosVenta",
-        body: {
-          Auth: createWsfeAuth(
-            representedTaxId ?? options.config.taxId,
-            auth.token,
-            auth.sign
-          ),
-        },
-      });
-      const result = unwrapWsfeOperationResult(
+      const result = await executeWsfeAuthenticatedOperation(
         "FEParamGetPtosVenta",
-        response.result
+        {
+          representedTaxId,
+          forceAuthRefresh,
+        }
       );
-      const resultGet = result.ResultGet as Record<string, unknown> | undefined;
-      const rawPoints = resultGet?.PtoVenta;
+      const rawPoints = (result.ResultGet as Record<string, unknown> | undefined)
+        ?.PtoVenta;
       if (!rawPoints) {
         return [];
       }
       const entries = Array.isArray(rawPoints) ? rawPoints : [rawPoints];
       return entries.map(mapWsfeSalesPoint);
+    },
+    getVoucherTypes(input) {
+      return getWsfeCatalog("FEParamGetTiposCbte", "CbteTipo", input);
+    },
+    getDocumentTypes(input) {
+      return getWsfeCatalog("FEParamGetTiposDoc", "DocTipo", input);
+    },
+    getConceptTypes(input) {
+      return getWsfeCatalog("FEParamGetTiposConcepto", "ConceptoTipo", input);
+    },
+    async getCurrencyTypes({ representedTaxId, forceAuthRefresh }) {
+      const result = await executeWsfeAuthenticatedOperation(
+        "FEParamGetTiposMonedas",
+        {
+          representedTaxId,
+          forceAuthRefresh,
+        }
+      );
+      return getWsfeResultEntries(result, "Moneda").map(mapWsfeCurrencyType);
+    },
+    getVatRates(input) {
+      return getWsfeCatalog("FEParamGetTiposIva", "IvaTipo", input);
+    },
+    getTaxTypes(input) {
+      return getWsfeCatalog("FEParamGetTiposTributos", "TributoTipo", input);
+    },
+    getOptionalTypes(input) {
+      return getWsfeCatalog("FEParamGetTiposOpcional", "OpcionalTipo", input);
+    },
+    async getServerStatus() {
+      const result = await executeWsfeOperation("FEDummy");
+      return mapWsfeServerStatus(result);
+    },
+    async getQuotation({
+      currencyId,
+      representedTaxId,
+      forceAuthRefresh,
+    }) {
+      const result = await executeWsfeAuthenticatedOperation(
+        "FEParamGetCotizacion",
+        {
+          representedTaxId,
+          forceAuthRefresh,
+        },
+        {
+          MonId: currencyId,
+        }
+      );
+      const raw = (result.ResultGet as Record<string, unknown> | undefined) ?? {};
+      return mapWsfeQuotation(raw);
     },
     async getVoucherInfo({
       representedTaxId,
@@ -311,29 +465,18 @@ export function createWsfeService(
       salesPoint,
       voucherType,
     }) {
-      const auth = await options.auth.login("wsfe", { representedTaxId });
-      const response = await options.soap.execute<
-        Record<string, unknown>,
-        Record<string, unknown>
-      >({
-        service: "wsfe",
-        operation: "FECompConsultar",
-        body: {
-          Auth: createWsfeAuth(
-            representedTaxId ?? options.config.taxId,
-            auth.token,
-            auth.sign
-          ),
+      const result = await executeWsfeAuthenticatedOperation(
+        "FECompConsultar",
+        {
+          representedTaxId,
+        },
+        {
           FeCompConsReq: {
             CbteNro: number,
             PtoVta: salesPoint,
             CbteTipo: voucherType,
           },
-        },
-      });
-      const result = unwrapWsfeOperationResult(
-        "FECompConsultar",
-        response.result
+        }
       );
       const raw = (result.ResultGet as Record<string, unknown> | null) ?? null;
       if (!raw) {
@@ -577,6 +720,40 @@ function mapWsfeSalesPoint(raw: unknown): WsfeSalesPoint {
   };
 }
 
+function mapWsfeCatalogEntry(raw: unknown): WsfeCatalogEntry {
+  const record = raw as Record<string, unknown>;
+  return {
+    id: Number(record.Id ?? 0),
+    description: String(record.Desc ?? ""),
+  };
+}
+
+function mapWsfeCurrencyType(raw: unknown): WsfeCurrencyType {
+  const record = raw as Record<string, unknown>;
+  return {
+    id: String(record.Id ?? ""),
+    description: String(record.Desc ?? ""),
+    validFrom: String(record.FchDesde ?? ""),
+    validTo: String(record.FchHasta ?? ""),
+  };
+}
+
+function mapWsfeServerStatus(raw: Record<string, unknown>): WsfeServerStatus {
+  return {
+    appServer: String(raw.AppServer ?? ""),
+    dbServer: String(raw.DbServer ?? ""),
+    authServer: String(raw.AuthServer ?? ""),
+  };
+}
+
+function mapWsfeQuotation(raw: Record<string, unknown>): WsfeQuotation {
+  return {
+    currencyId: String(raw.MonId ?? ""),
+    rate: Number(raw.MonCotiz ?? 0),
+    date: String(raw.FchCotiz ?? ""),
+  };
+}
+
 function mapWsfeVoucherInfo(raw: Record<string, unknown>): WsfeVoucherInfo {
   return {
     voucherNumber: Number(raw.CbteDesde ?? raw.CbteHasta ?? 0),
@@ -694,4 +871,20 @@ function normalizeWsfeErrors(rawErrors: unknown) {
         message: `(${String(code)}) ${String(message)}`,
       };
     });
+}
+
+function getWsfeResultEntries(
+  result: Record<string, unknown>,
+  key: string
+): Record<string, unknown>[] {
+  const rawEntries = (result.ResultGet as Record<string, unknown> | undefined)?.[
+    key
+  ];
+  if (!rawEntries) {
+    return [];
+  }
+
+  return (Array.isArray(rawEntries) ? rawEntries : [rawEntries]).map(
+    (entry) => entry as Record<string, unknown>
+  );
 }

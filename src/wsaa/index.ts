@@ -3,6 +3,7 @@ import forge from "node-forge";
 import { ARCA_WSAA_CONFIG } from "../config";
 import { ArcaSoapFaultError, ArcaTransportError } from "../errors";
 import { postXml } from "../internal/http";
+import type { ArcaLogger } from "../internal/logger";
 import type {
   ArcaAuthCredentials,
   ArcaAuthOptions,
@@ -25,6 +26,7 @@ export type WsaaAuthModule = {
 
 export type CreateWsaaAuthModuleOptions = {
   config: ArcaClientConfig;
+  logger?: ArcaLogger;
 };
 
 type ForgeSignerOptions = Parameters<
@@ -55,11 +57,26 @@ export function createWsaaAuthModule(
         if (!authOptions.forceRefresh) {
           const cached = getCachedCredentials(cache, cacheKey);
           if (cached) {
+            options.logger?.debug("Attempting WSAA login", {
+              service,
+              source: "cached",
+            });
             return cached;
           }
         }
 
-        const credentials = await requestCredentials(options.config, service);
+        options.logger?.debug("Attempting WSAA login", {
+          service,
+          source: "fresh",
+        });
+
+        const credentials = await requestCredentials(options.config, service, {
+          logger: options.logger,
+        });
+        options.logger?.info("WSAA login succeeded", {
+          service,
+          expiresAt: credentials.expiresAt,
+        });
         cache.set(cacheKey, credentials);
         return credentials;
       })();
@@ -76,8 +93,22 @@ export function createWsaaAuthModule(
         ) {
           const cached = getCachedCredentials(cache, cacheKey);
           if (cached) {
+            options.logger?.warn("Recovered WSAA coe.alreadyAuthenticated fault", {
+              service,
+              faultCode: error.faultCode,
+            });
             return cached;
           }
+        }
+
+        if (error instanceof ArcaSoapFaultError) {
+          options.logger?.error("WSAA SOAP fault response", {
+            service,
+            operation: "loginCms",
+            url: ARCA_WSAA_CONFIG.endpoint[options.config.environment],
+            faultCode: error.faultCode,
+            error,
+          });
         }
 
         throw error;
@@ -90,7 +121,10 @@ export function createWsaaAuthModule(
 
 async function requestCredentials(
   config: ArcaClientConfig,
-  service: ArcaWsaaServiceId
+  service: ArcaWsaaServiceId,
+  options?: {
+    logger?: ArcaLogger;
+  }
 ): Promise<ArcaAuthCredentials> {
   const loginTicketRequestXml = buildLoginTicketRequest(service);
   const signedCms = signLoginTicketRequest(loginTicketRequestXml, {
@@ -110,6 +144,12 @@ async function requestCredentials(
     body: requestXml,
     contentType: 'text/xml; charset="utf-8"',
     soapAction: ARCA_WSAA_CONFIG.soapActionBase,
+    timeout: config.timeout,
+    retries: config.retries,
+    retryDelay: config.retryDelay,
+    logger: options?.logger,
+    service: "wsaa",
+    operation: "loginCms",
   });
 
   const soapBody = parseSoapBody(responseXml);

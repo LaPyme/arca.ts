@@ -63,6 +63,9 @@ describe("config", () => {
       privateKeyPem:
         "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
       environment: "test",
+      timeout: 30_000,
+      retries: 0,
+      retryDelay: 500,
     });
   });
 

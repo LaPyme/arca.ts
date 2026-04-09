@@ -3,6 +3,8 @@ export type {
   ArcaAuthOptions,
   ArcaClientConfig,
   ArcaEnvironment,
+  ArcaLogLevel,
+  ArcaLoggerConfig,
   ArcaPadronServiceName,
   ArcaRepresentedTaxId,
   ArcaServiceName,

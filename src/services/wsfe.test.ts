@@ -49,6 +49,19 @@ function createBaseVoucherInput(
   };
 }
 
+function createWsfeOperationResult(
+  operation: string,
+  result: Record<string, unknown>
+) {
+  return {
+    result: {
+      [`${operation}Response`]: {
+        [`${operation}Result`]: result,
+      },
+    },
+  };
+}
+
 describe("createWsfeService", () => {
   it("creates the next voucher and wraps WSFE collection fields", async () => {
     const options = createBaseOptions();
@@ -482,6 +495,217 @@ describe("createWsfeService", () => {
         CbteDesde: 77,
         CbteHasta: 77,
         Resultado: "A",
+      },
+    });
+  });
+
+  it.each([
+    {
+      name: "voucher types",
+      method: "getVoucherTypes",
+      operation: "FEParamGetTiposCbte",
+      resultKey: "CbteTipo",
+      rawEntry: { Id: 1, Desc: "Factura A" },
+      expected: [{ id: 1, description: "Factura A" }],
+    },
+    {
+      name: "document types",
+      method: "getDocumentTypes",
+      operation: "FEParamGetTiposDoc",
+      resultKey: "DocTipo",
+      rawEntry: { Id: 80, Desc: "CUIT" },
+      expected: [{ id: 80, description: "CUIT" }],
+    },
+    {
+      name: "concept types",
+      method: "getConceptTypes",
+      operation: "FEParamGetTiposConcepto",
+      resultKey: "ConceptoTipo",
+      rawEntry: { Id: 2, Desc: "Servicios" },
+      expected: [{ id: 2, description: "Servicios" }],
+    },
+    {
+      name: "vat rates",
+      method: "getVatRates",
+      operation: "FEParamGetTiposIva",
+      resultKey: "IvaTipo",
+      rawEntry: { Id: "5", Desc: "21%" },
+      expected: [{ id: 5, description: "21%" }],
+    },
+    {
+      name: "tax types",
+      method: "getTaxTypes",
+      operation: "FEParamGetTiposTributos",
+      resultKey: "TributoTipo",
+      rawEntry: { Id: 99, Desc: "Impuesto municipal" },
+      expected: [{ id: 99, description: "Impuesto municipal" }],
+    },
+    {
+      name: "optional field types",
+      method: "getOptionalTypes",
+      operation: "FEParamGetTiposOpcional",
+      resultKey: "OpcionalTipo",
+      rawEntry: { Id: "27", Desc: "Referencia comercial" },
+      expected: [{ id: 27, description: "Referencia comercial" }],
+    },
+  ])(
+    "retrieves %s",
+    async ({ method, operation, resultKey, rawEntry, expected }) => {
+      const options = createBaseOptions();
+      options.soap.execute.mockResolvedValueOnce(
+        createWsfeOperationResult(operation, {
+          ResultGet: {
+            [resultKey]: rawEntry,
+          },
+        })
+      );
+
+      const service = createWsfeService(options);
+      const execute = service[method as keyof typeof service] as (input: {
+        representedTaxId?: number | string;
+        forceAuthRefresh?: boolean;
+      }) => Promise<unknown>;
+
+      await expect(
+        execute({
+          representedTaxId: "20304050607",
+          forceAuthRefresh: true,
+        })
+      ).resolves.toEqual(expected);
+      expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
+        representedTaxId: "20304050607",
+        forceRefresh: true,
+      });
+      expect(options.soap.execute).toHaveBeenCalledWith({
+        service: "wsfe",
+        operation,
+        body: {
+          Auth: {
+            Token: "token",
+            Sign: "sign",
+            Cuit: 20_304_050_607,
+          },
+        },
+      });
+    }
+  );
+
+  it("retrieves currency types", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FEParamGetTiposMonedas", {
+        ResultGet: {
+          Moneda: {
+            Id: "USD",
+            Desc: "Dolar Estadounidense",
+            FchDesde: "20200101",
+            FchHasta: "NULL",
+          },
+        },
+      })
+    );
+
+    const service = createWsfeService(options);
+
+    await expect(
+      service.getCurrencyTypes({
+        representedTaxId: "20304050607",
+        forceAuthRefresh: true,
+      })
+    ).resolves.toEqual([
+      {
+        id: "USD",
+        description: "Dolar Estadounidense",
+        validFrom: "20200101",
+        validTo: "NULL",
+      },
+    ]);
+    expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+    });
+    expect(options.soap.execute).toHaveBeenCalledWith({
+      service: "wsfe",
+      operation: "FEParamGetTiposMonedas",
+      body: {
+        Auth: {
+          Token: "token",
+          Sign: "sign",
+          Cuit: 20_304_050_607,
+        },
+      },
+    });
+  });
+
+  it("retrieves server status", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FEDummy", {
+        AppServer: "OK",
+        DbServer: "OK",
+        AuthServer: "OK",
+      })
+    );
+
+    const service = createWsfeService(options);
+
+    await expect(
+      service.getServerStatus({
+        representedTaxId: "20304050607",
+        forceAuthRefresh: true,
+      })
+    ).resolves.toEqual({
+      appServer: "OK",
+      dbServer: "OK",
+      authServer: "OK",
+    });
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).toHaveBeenCalledWith({
+      service: "wsfe",
+      operation: "FEDummy",
+      body: {},
+    });
+  });
+
+  it("retrieves quotations", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FEParamGetCotizacion", {
+        ResultGet: {
+          MonId: "USD",
+          MonCotiz: 1095.5,
+          FchCotiz: "20260501",
+        },
+      })
+    );
+
+    const service = createWsfeService(options);
+
+    await expect(
+      service.getQuotation({
+        currencyId: "USD",
+        representedTaxId: "20304050607",
+        forceAuthRefresh: true,
+      })
+    ).resolves.toEqual({
+      currencyId: "USD",
+      rate: 1095.5,
+      date: "20260501",
+    });
+    expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+    });
+    expect(options.soap.execute).toHaveBeenCalledWith({
+      service: "wsfe",
+      operation: "FEParamGetCotizacion",
+      body: {
+        Auth: {
+          Token: "token",
+          Sign: "sign",
+          Cuit: 20_304_050_607,
+        },
+        MonId: "USD",
       },
     });
   });

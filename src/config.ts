@@ -2,6 +2,7 @@ import { ArcaConfigurationError } from "./errors";
 import type {
   ArcaClientConfig,
   ArcaEnvironment,
+  ArcaLogLevel,
   ArcaServiceName,
   ArcaSoapVersion,
 } from "./internal/types";
@@ -30,6 +31,10 @@ const PRIVATE_KEY_PEM_PREFIXES = [
   "-----BEGIN RSA PRIVATE KEY-----",
   "-----BEGIN ENCRYPTED PRIVATE KEY-----",
 ] as const;
+const VALID_ARCA_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
+const DEFAULT_ARCA_TIMEOUT_MS = 30_000;
+const DEFAULT_ARCA_RETRIES = 0;
+const DEFAULT_ARCA_RETRY_DELAY_MS = 500;
 
 /** Returns `"production"` or `"test"` based on the boolean flag. */
 export function resolveArcaEnvironment(production: boolean): ArcaEnvironment {
@@ -76,6 +81,9 @@ export function createArcaClientConfigFromEnv(
 export function assertArcaClientConfig(config: ArcaClientConfig): void {
   const invalidFields: string[] = [];
   const normalized = normalizeArcaClientConfig(config);
+  const timeout = normalized.timeout ?? DEFAULT_ARCA_TIMEOUT_MS;
+  const retries = normalized.retries ?? DEFAULT_ARCA_RETRIES;
+  const retryDelay = normalized.retryDelay ?? DEFAULT_ARCA_RETRY_DELAY_MS;
 
   if (!/^\d{11}$/.test(normalized.taxId)) {
     invalidFields.push("taxId");
@@ -95,6 +103,33 @@ export function assertArcaClientConfig(config: ArcaClientConfig): void {
 
   if (!ARCA_ENVIRONMENTS.includes(normalized.environment)) {
     invalidFields.push("environment");
+  }
+
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    invalidFields.push("timeout");
+  }
+
+  if (!Number.isInteger(retries) || retries < 0) {
+    invalidFields.push("retries");
+  }
+
+  if (!Number.isFinite(retryDelay) || retryDelay < 0) {
+    invalidFields.push("retryDelay");
+  }
+
+  const loggerLevel = normalized.logger?.level;
+  if (
+    loggerLevel !== undefined &&
+    !VALID_ARCA_LOG_LEVELS.includes(loggerLevel)
+  ) {
+    invalidFields.push("logger.level");
+  }
+
+  if (
+    normalized.logger?.log !== undefined &&
+    typeof normalized.logger.log !== "function"
+  ) {
+    invalidFields.push("logger.log");
   }
 
   if (invalidFields.length > 0) {
@@ -187,12 +222,26 @@ export function normalizeArcaClientConfig(
 ): ArcaClientConfig {
   const normalizedEnvironment =
     normalizeEnvironmentValue(String(config.environment)) ?? config.environment;
+  const normalizedLoggerLevel = normalizeLogLevelValue(config.logger?.level);
 
   return {
     taxId: config.taxId.trim(),
     certificatePem: config.certificatePem.trim(),
     privateKeyPem: config.privateKeyPem.trim(),
     environment: normalizedEnvironment,
+    timeout: config.timeout ?? DEFAULT_ARCA_TIMEOUT_MS,
+    retries: config.retries ?? DEFAULT_ARCA_RETRIES,
+    retryDelay: config.retryDelay ?? DEFAULT_ARCA_RETRY_DELAY_MS,
+    ...(config.logger === undefined
+      ? {}
+      : {
+          logger: {
+            ...config.logger,
+            ...(normalizedLoggerLevel === undefined
+              ? {}
+              : { level: normalizedLoggerLevel }),
+          },
+        }),
   };
 }
 
@@ -214,4 +263,17 @@ function readEnv(
   variableName: string
 ): string | undefined {
   return env[variableName]?.trim() || undefined;
+}
+
+function normalizeLogLevelValue(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (VALID_ARCA_LOG_LEVELS.includes(normalized as ArcaLogLevel)) {
+    return normalized as ArcaLogLevel;
+  }
+
+  return value as ArcaLogLevel;
 }

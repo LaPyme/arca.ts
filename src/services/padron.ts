@@ -157,6 +157,9 @@ async function executePadronOperation(
   } catch (error) {
     if (
       error instanceof ArcaSoapFaultError &&
+      // Public Padron A5/A13 WSDLs expose only a generic validation fault, so
+      // there is no documented not-found-specific fault code to match here.
+      // Keep the current message fallback, but treat it as fragile.
       error.message.toLowerCase().includes("no existe")
     ) {
       return null;

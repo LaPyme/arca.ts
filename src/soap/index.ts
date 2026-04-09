@@ -1,5 +1,7 @@
 import { getArcaServiceConfig } from "../config";
+import { ArcaSoapFaultError } from "../errors";
 import { postXml } from "../internal/http";
+import type { ArcaLogger } from "../internal/logger";
 import type {
   ArcaClientConfig,
   ArcaSoapExecutionOptions,
@@ -19,7 +21,7 @@ export type SoapTransport = {
 
 export type CreateSoapTransportOptions = {
   config: ArcaClientConfig;
-  fetchImplementation?: typeof fetch;
+  logger?: ArcaLogger;
 };
 
 export function createSoapTransport(
@@ -28,6 +30,7 @@ export function createSoapTransport(
   return {
     async execute<TBody, TResult>(request: ArcaSoapExecutionOptions<TBody>) {
       const serviceConfig = getArcaServiceConfig(request.service);
+      const url = serviceConfig.endpoint[options.config.environment];
       const soapActionOperation = request.operation;
       const bodyElementName = request.bodyElementName ?? request.operation;
       const soapAction = serviceConfig.usesEmptySoapAction
@@ -46,26 +49,60 @@ export function createSoapTransport(
           namespaceMode: request.bodyElementNamespaceMode,
         }
       );
-      const responseXml = await postXml({
-        url: serviceConfig.endpoint[options.config.environment],
-        body: xml,
-        contentType,
-        soapAction:
-          serviceConfig.soapVersion === "1.1" ? soapAction : undefined,
-        useLegacyTlsSecurityLevel0:
-          options.config.environment === "production" &&
-          serviceConfig.useLegacyTlsSecurityLevel0 === true,
-      });
+      const startedAt = Date.now();
 
-      const soapBody = parseSoapBody(responseXml);
-      const [, result] = getSingleBodyEntry<Record<string, unknown>>(soapBody);
-
-      return {
+      options.logger?.debug("Sending ARCA SOAP request", {
         service: request.service,
         operation: request.operation,
-        raw: responseXml,
-        result: result as TResult,
-      };
+        url,
+      });
+
+      try {
+        const responseXml = await postXml({
+          url,
+          body: xml,
+          contentType,
+          soapAction:
+            serviceConfig.soapVersion === "1.1" ? soapAction : undefined,
+          useLegacyTlsSecurityLevel0:
+            options.config.environment === "production" &&
+            serviceConfig.useLegacyTlsSecurityLevel0 === true,
+          timeout: options.config.timeout,
+          retries: options.config.retries,
+          retryDelay: options.config.retryDelay,
+          logger: options.logger,
+          service: request.service,
+          operation: request.operation,
+        });
+
+        options.logger?.debug("Received ARCA SOAP response", {
+          service: request.service,
+          operation: request.operation,
+          durationMs: Date.now() - startedAt,
+        });
+
+        const soapBody = parseSoapBody(responseXml);
+        const [, result] = getSingleBodyEntry<Record<string, unknown>>(soapBody);
+
+        return {
+          service: request.service,
+          operation: request.operation,
+          raw: responseXml,
+          result: result as TResult,
+        };
+      } catch (error) {
+        if (error instanceof ArcaSoapFaultError) {
+          options.logger?.error("ARCA SOAP fault response", {
+            service: request.service,
+            operation: request.operation,
+            url,
+            faultCode: error.faultCode,
+            error,
+          });
+        }
+
+        throw error;
+      }
     },
   };
 }

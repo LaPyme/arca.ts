@@ -1,4 +1,5 @@
 import { assertArcaClientConfig, normalizeArcaClientConfig } from "./config";
+import { createArcaLogger } from "./internal/logger";
 import type { ArcaClientConfig } from "./internal/types";
 import { createPadronService, type PadronService } from "./services/padron";
 import { createWsfeService, type WsfeService } from "./services/wsfe";
@@ -24,9 +25,10 @@ export type ArcaClient = {
 export function createArcaClient(config: ArcaClientConfig): ArcaClient {
   assertArcaClientConfig(config);
   const normalizedConfig = normalizeArcaClientConfig(config);
+  const logger = createArcaLogger(normalizedConfig.logger);
 
-  const auth = createWsaaAuthModule({ config: normalizedConfig });
-  const soap = createSoapTransport({ config: normalizedConfig });
+  const auth = createWsaaAuthModule({ config: normalizedConfig, logger });
+  const soap = createSoapTransport({ config: normalizedConfig, logger });
 
   return {
     config: normalizedConfig,

@@ -27,12 +27,28 @@ export type ArcaWsaaServiceId =
 
 export type ArcaSoapVersion = "1.1" | "1.2";
 
+export type ArcaLogLevel = "debug" | "info" | "warn" | "error";
+
+export type ArcaLoggerConfig = {
+  disabled?: boolean;
+  level?: ArcaLogLevel;
+  log?: (
+    level: ArcaLogLevel,
+    message: string,
+    ...args: unknown[]
+  ) => void;
+};
+
 /** Configuration required to create an ARCA client. */
 export type ArcaClientConfig = {
   taxId: string;
   certificatePem: string;
   privateKeyPem: string;
   environment: ArcaEnvironment;
+  timeout?: number;
+  retries?: number;
+  retryDelay?: number;
+  logger?: ArcaLoggerConfig;
 };
 
 /** Credentials returned by a WSAA login. */

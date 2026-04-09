@@ -1,5 +1,6 @@
 import https from "node:https";
 import { ArcaTransportError } from "../errors";
+import type { ArcaLogger } from "./logger";
 
 const defaultAgent = new https.Agent({
   keepAlive: true,
@@ -9,7 +10,6 @@ const legacyTlsAgent = new https.Agent({
   keepAlive: true,
   ciphers: "DEFAULT@SECLEVEL=0",
 });
-const REQUEST_TIMEOUT_MS = 30_000;
 
 type PostXmlOptions = {
   url: string;
@@ -17,6 +17,12 @@ type PostXmlOptions = {
   contentType: string;
   soapAction?: string;
   useLegacyTlsSecurityLevel0?: boolean;
+  timeout?: number;
+  retries?: number;
+  retryDelay?: number;
+  logger?: ArcaLogger;
+  service?: string;
+  operation?: string;
 };
 
 export async function postXml({
@@ -25,7 +31,74 @@ export async function postXml({
   contentType,
   soapAction,
   useLegacyTlsSecurityLevel0 = false,
+  timeout = 30_000,
+  retries = 0,
+  retryDelay = 500,
+  logger,
+  service,
+  operation,
 }: PostXmlOptions): Promise<string> {
+  const totalAttempts = retries + 1;
+  for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+    try {
+      return await postXmlOnce({
+        url,
+        body,
+        contentType,
+        soapAction,
+        useLegacyTlsSecurityLevel0,
+        timeout,
+      });
+    } catch (error) {
+      if (!(error instanceof ArcaTransportError)) {
+        throw error;
+      }
+
+      if (attempt >= totalAttempts) {
+        logger?.error("ARCA transport request failed", {
+          service,
+          operation,
+          url,
+          attempt,
+          attempts: totalAttempts,
+          error,
+        });
+        throw error;
+      }
+
+      const nextAttempt = attempt + 1;
+      logger?.warn(
+        `Retrying ARCA request after transport failure (attempt ${nextAttempt}/${totalAttempts})`,
+        {
+          service,
+          operation,
+          url,
+          attempt: nextAttempt,
+          attempts: totalAttempts,
+          error,
+        }
+      );
+      await delay(retryDelay);
+    }
+  }
+
+  throw new ArcaTransportError("ARCA HTTP request exhausted retries");
+}
+
+async function postXmlOnce({
+  url,
+  body,
+  contentType,
+  soapAction,
+  useLegacyTlsSecurityLevel0,
+  timeout,
+}: Required<
+  Pick<
+    PostXmlOptions,
+    "url" | "body" | "contentType" | "useLegacyTlsSecurityLevel0" | "timeout"
+  >
+> &
+  Pick<PostXmlOptions, "soapAction">): Promise<string> {
   const endpoint = new URL(url);
   const requestBody = Buffer.from(body, "utf8");
 
@@ -129,9 +202,9 @@ export async function postXml({
       }
     );
 
-    request.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    request.setTimeout(timeout, () => {
       request.destroy(
-        new Error(`ARCA HTTP request timed out after ${REQUEST_TIMEOUT_MS}ms`)
+        new Error(`ARCA HTTP request timed out after ${timeout}ms`)
       );
     });
 
@@ -158,4 +231,10 @@ function isXmlLikeResponse(body: string, contentType?: string): boolean {
   }
 
   return body.trimStart().startsWith("<");
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
