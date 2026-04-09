@@ -1,11 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import forge from "node-forge";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockPostXml = vi.hoisted(() => vi.fn());
-const temporaryDirectories: string[] = [];
 
 vi.mock("../internal/http", () => ({
   postXml: mockPostXml,
@@ -33,21 +29,6 @@ function createWsaaConfig() {
     certificatePem: forge.pki.certificateToPem(certificate),
     privateKeyPem: forge.pki.privateKeyToPem(keys.privateKey),
     environment: "test" as const,
-  };
-}
-
-async function createDiskCachedWsaaConfig() {
-  const directory = await mkdtemp(path.join(tmpdir(), "arcats-wsaa-cache-"));
-  temporaryDirectories.push(directory);
-
-  return {
-    ...createWsaaConfig(),
-    wsaa: {
-      cache: {
-        mode: "disk" as const,
-        directory,
-      },
-    },
   };
 }
 
@@ -88,15 +69,9 @@ async function loadWsaaModule() {
   return module;
 }
 
-afterEach(async () => {
+afterEach(() => {
   mockPostXml.mockReset();
   vi.resetModules();
-
-  await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true })
-    )
-  );
 });
 
 describe("createWsaaAuthModule", () => {
@@ -193,42 +168,6 @@ describe("createWsaaAuthModule", () => {
       token: "third",
     });
     expect(mockPostXml).toHaveBeenCalledTimes(1);
-  });
-
-  it("persists WSAA credentials only when disk cache mode is configured", async () => {
-    const config = await createDiskCachedWsaaConfig();
-    mockPostXml
-      .mockResolvedValueOnce(
-        createWsaaSoapResponse(createLoginTicketResponseXml({ token: "first" }))
-      )
-      .mockResolvedValueOnce(
-        createWsaaSoapResponse(
-          createLoginTicketResponseXml({ token: "second" })
-        )
-      );
-
-    const { createWsaaAuthModule } = await loadWsaaModule();
-    const auth = createWsaaAuthModule({ config });
-
-    await expect(auth.login("wsmtxca")).resolves.toMatchObject({
-      token: "first",
-    });
-    await expect(
-      auth.login("wsmtxca", { forceRefresh: true })
-    ).resolves.toMatchObject({
-      token: "second",
-    });
-    expect(mockPostXml).toHaveBeenCalledTimes(2);
-
-    vi.clearAllMocks();
-    vi.resetModules();
-
-    const reloaded = await loadWsaaModule();
-    const reloadedAuth = reloaded.createWsaaAuthModule({ config });
-    await expect(reloadedAuth.login("wsmtxca")).resolves.toMatchObject({
-      token: "second",
-    });
-    expect(mockPostXml).not.toHaveBeenCalled();
   });
 
   it("rejects missing or invalid WSAA login ticket payloads", async () => {

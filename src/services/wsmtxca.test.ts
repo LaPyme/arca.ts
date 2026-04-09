@@ -256,8 +256,7 @@ describe("createWsmtxcaService", () => {
       })
     ).rejects.toMatchObject({
       name: "ArcaServiceError",
-      message:
-        "WSMTXCA did not return the voucher issue date",
+      message: "WSMTXCA did not return the voucher issue date",
     });
   });
 });

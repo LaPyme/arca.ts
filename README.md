@@ -5,7 +5,6 @@
 The package is ESM-first, supports Node.js `>=20`, and defaults to a safe configuration for open-source use:
 
 - WSAA credentials stay in memory by default.
-- Disk-backed WSAA caching is opt-in and requires an explicit directory.
 - The documented public surface is intentionally narrow.
 
 ## Install
@@ -28,7 +27,7 @@ const client = createArcaClient(
   })
 );
 
-const nextVoucher = await client.wsfe.getLastVoucher({
+const nextVoucher = await client.wsfe.getNextVoucherNumber({
   salesPoint: 1,
   voucherType: 6,
 });
@@ -60,40 +59,16 @@ const client = createArcaClient({
 });
 ```
 
-### Opt-in disk cache for WSAA credentials
-
-By default, WSAA login tickets are cached in memory only. To persist them across process restarts, enable disk cache explicitly:
-
-```ts
-import { createArcaClient } from "@lapyme/arca";
-
-const client = createArcaClient({
-  taxId: "20123456789",
-  certificatePem: process.env.ARCA_CERTIFICATE_PEM!,
-  privateKeyPem: process.env.ARCA_PRIVATE_KEY_PEM!,
-  environment: "production",
-  wsaa: {
-    cache: {
-      mode: "disk",
-      directory: ".arca-wsaa-cache",
-    },
-  },
-});
-```
-
-Environment-based configuration also supports:
-
-- `ARCA_WSAA_CACHE_MODE` with `memory` or `disk`
-- `ARCA_WSAA_CACHE_DIRECTORY` when `ARCA_WSAA_CACHE_MODE=disk`
-
 ## Supported Modules
 
 ### `client.wsfe`
 
 WSFE electronic invoicing. All inputs and outputs use JS-convention names; the library maps them to AFIP's SOAP schema internally.
 
+- WSFE request date fields accept `YYYY-MM-DD` or `YYYYMMDD` strings.
 - `createNextVoucher({ data })` — Authorizes a new voucher. Takes a typed `WsfeVoucherInput` and returns `WsfeAuthorizationResult` with `cae`, `caeExpiry`, `voucherNumber`, and `raw`.
-- `getLastVoucher({ salesPoint, voucherType })` — Returns the next available voucher number.
+- `getNextVoucherNumber({ salesPoint, voucherType })` — Returns the next available voucher number.
+- `getLastVoucher({ salesPoint, voucherType })` — Deprecated alias for `getNextVoucherNumber()`.
 - `getSalesPoints({})` — Lists configured points of sale as `WsfeSalesPoint[]`.
 - `getVoucherInfo({ number, salesPoint, voucherType })` — Retrieves voucher details as `WsfeVoucherInfo | null`.
 
@@ -170,8 +145,7 @@ pnpm pack:check
 ## Security Notes
 
 - Treat your certificate and private key as secrets.
-- Default in-memory WSAA caching avoids silent disk writes.
-- If you enable disk cache, point it at a directory with appropriate filesystem permissions for your runtime.
+- WSAA credentials are cached in memory only and are never written to disk by this package.
 
 ## License
 

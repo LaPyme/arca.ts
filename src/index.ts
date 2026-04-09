@@ -3,8 +3,8 @@ export type { ArcaClient } from "./client";
 export { createArcaClient } from "./client";
 export type { CreateArcaClientConfigFromEnvOptions } from "./config";
 export {
-  ARCA_ENVIRONMENTS,
   ARCA_ENV_VARIABLES,
+  ARCA_ENVIRONMENTS,
   assertArcaClientConfig,
   createArcaClientConfigFromEnv,
   resolveArcaEnvironment,
@@ -12,22 +12,11 @@ export {
 export {
   ArcaConfigurationError,
   ArcaError,
+  ArcaInputError,
   ArcaServiceError,
   ArcaSoapFaultError,
   ArcaTransportError,
 } from "./errors";
-export type {
-  ArcaAuthCredentials,
-  ArcaAuthOptions,
-  ArcaClientConfig,
-  ArcaEnvironment,
-  ArcaPadronServiceName,
-  ArcaRepresentedTaxId,
-  ArcaServiceName,
-  ArcaServiceTarget,
-  ArcaWsaaCacheConfig,
-  ArcaWsaaServiceId,
-} from "./types";
 export type {
   CreatePadronServiceOptions,
   PadronService,
@@ -40,6 +29,7 @@ export type {
   WsfeAssociatedVoucher,
   WsfeAuthorizationResult,
   WsfeBuyer,
+  WsfeDateInput,
   WsfeOptionalField,
   WsfeSalesPoint,
   WsfeService,
@@ -57,3 +47,14 @@ export type {
   WsmtxcaVoucherLookupResult,
 } from "./services/wsmtxca";
 export { createWsmtxcaService } from "./services/wsmtxca";
+export type {
+  ArcaAuthCredentials,
+  ArcaAuthOptions,
+  ArcaClientConfig,
+  ArcaEnvironment,
+  ArcaPadronServiceName,
+  ArcaRepresentedTaxId,
+  ArcaServiceName,
+  ArcaServiceTarget,
+  ArcaWsaaServiceId,
+} from "./types";

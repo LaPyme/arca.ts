@@ -1,23 +1,20 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import forge from "node-forge";
 import { ARCA_WSAA_CONFIG } from "../config";
 import { ArcaSoapFaultError, ArcaTransportError } from "../errors";
 import { postXml } from "../internal/http";
+import type {
+  ArcaAuthCredentials,
+  ArcaAuthOptions,
+  ArcaClientConfig,
+  ArcaWsaaServiceId,
+} from "../internal/types";
 import {
   buildSoapEnvelope,
   getSingleBodyEntry,
   parseSoapBody,
   parseXmlDocument,
 } from "../internal/xml";
-import type {
-  ArcaAuthCredentials,
-  ArcaAuthOptions,
-  ArcaClientConfig,
-  ArcaWsaaCacheConfig,
-  ArcaWsaaServiceId,
-} from "../internal/types";
 
 export type WsaaAuthModule = {
   login(
@@ -45,7 +42,6 @@ export function createWsaaAuthModule(
 ): WsaaAuthModule {
   const cache = new Map<string, ArcaAuthCredentials>();
   const inFlight = new Map<string, Promise<ArcaAuthCredentials>>();
-  const persistedCache = createPersistedCredentialStore(options.config.wsaa?.cache);
 
   return {
     async login(service, authOptions = {}) {
@@ -57,11 +53,7 @@ export function createWsaaAuthModule(
 
       const loginPromise = (async () => {
         if (!authOptions.forceRefresh) {
-          const cached = await getCachedCredentials(
-            cache,
-            cacheKey,
-            persistedCache
-          );
+          const cached = getCachedCredentials(cache, cacheKey);
           if (cached) {
             return cached;
           }
@@ -69,7 +61,6 @@ export function createWsaaAuthModule(
 
         const credentials = await requestCredentials(options.config, service);
         cache.set(cacheKey, credentials);
-        await persistedCache.write(cacheKey, credentials);
         return credentials;
       })();
 
@@ -83,11 +74,7 @@ export function createWsaaAuthModule(
           error instanceof ArcaSoapFaultError &&
           error.faultCode === "ns1:coe.alreadyAuthenticated"
         ) {
-          const cached = await getCachedCredentials(
-            cache,
-            cacheKey,
-            persistedCache
-          );
+          const cached = getCachedCredentials(cache, cacheKey);
           if (cached) {
             return cached;
           }
@@ -155,86 +142,16 @@ function isCredentialValid(credentials: ArcaAuthCredentials): boolean {
   return new Date(credentials.expiresAt).getTime() - Date.now() > 60_000;
 }
 
-async function getCachedCredentials(
+function getCachedCredentials(
   cache: Map<string, ArcaAuthCredentials>,
-  cacheKey: string,
-  persistedCache: PersistedCredentialStore
-): Promise<ArcaAuthCredentials | null> {
+  cacheKey: string
+): ArcaAuthCredentials | null {
   const localCached = cache.get(cacheKey);
   if (localCached && isCredentialValid(localCached)) {
     return localCached;
   }
 
-  const persisted = await persistedCache.read(cacheKey);
-  if (persisted) {
-    cache.set(cacheKey, persisted);
-    return persisted;
-  }
-
   return null;
-}
-
-type PersistedCredentialStore = {
-  read(cacheKey: string): Promise<ArcaAuthCredentials | null>;
-  write(cacheKey: string, credentials: ArcaAuthCredentials): Promise<void>;
-};
-
-function createPersistedCredentialStore(
-  cacheConfig: ArcaWsaaCacheConfig | undefined
-): PersistedCredentialStore {
-  if (!cacheConfig || cacheConfig.mode !== "disk") {
-    return {
-      async read() {
-        return null;
-      },
-      async write() {},
-    };
-  }
-
-  const cacheDir = path.resolve(cacheConfig.directory);
-
-  return {
-    async read(cacheKey) {
-      try {
-        const serialized = await readFile(
-          getSharedCacheFilePath(cacheDir, cacheKey),
-          "utf8"
-        );
-        const parsed = JSON.parse(serialized) as Partial<ArcaAuthCredentials>;
-
-        if (
-          typeof parsed.token !== "string" ||
-          typeof parsed.sign !== "string" ||
-          typeof parsed.expiresAt !== "string"
-        ) {
-          return null;
-        }
-
-        const credentials = {
-          token: parsed.token,
-          sign: parsed.sign,
-          expiresAt: parsed.expiresAt,
-        } satisfies ArcaAuthCredentials;
-
-        return isCredentialValid(credentials) ? credentials : null;
-      } catch {
-        return null;
-      }
-    },
-    async write(cacheKey, credentials) {
-      await mkdir(cacheDir, { recursive: true });
-      await writeFile(
-        getSharedCacheFilePath(cacheDir, cacheKey),
-        JSON.stringify(credentials),
-        "utf8"
-      );
-    },
-  };
-}
-
-function getSharedCacheFilePath(cacheDir: string, cacheKey: string): string {
-  const fileName = `${createHash("sha256").update(cacheKey).digest("hex")}.json`;
-  return path.join(cacheDir, fileName);
 }
 
 function buildLoginTicketRequest(service: ArcaWsaaServiceId): string {

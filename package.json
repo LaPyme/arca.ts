@@ -1,17 +1,17 @@
 {
   "name": "@lapyme/arca",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Node.js client for ARCA services including WSFE, WSMTXCA, and padron lookups.",
   "type": "module",
   "license": "MIT",
   "author": "Lapyme",
-  "homepage": "https://github.com/LaPyme/arcats#readme",
+  "homepage": "https://github.com/LaPyme/arca.ts#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LaPyme/arcats.git"
+    "url": "git+https://github.com/LaPyme/arca.ts.git"
   },
   "bugs": {
-    "url": "https://github.com/LaPyme/arcats/issues"
+    "url": "https://github.com/LaPyme/arca.ts/issues"
   },
   "keywords": [
     "arca",
@@ -41,7 +41,9 @@
     "prepack": "pnpm build",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run --config vitest.config.ts",
-    "test:coverage": "vitest run --config vitest.config.ts --coverage"
+    "test:coverage": "vitest run --config vitest.config.ts --coverage",
+    "check": "ultracite check",
+    "fix": "ultracite fix"
   },
   "exports": {
     ".": {
@@ -78,11 +80,13 @@
     "node-forge": "^1.3.1"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.0.18",
+    "@biomejs/biome": "2.4.10",
     "@types/node": "^25.0.8",
     "@types/node-forge": "^1.3.14",
+    "@vitest/coverage-v8": "^4.0.18",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3",
+    "ultracite": "7.4.4",
     "vitest": "^4.0.18"
   }
 }

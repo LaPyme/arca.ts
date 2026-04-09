@@ -1,7 +1,12 @@
-import { ArcaServiceError } from "../errors";
-import type { SoapTransport } from "../soap";
+import { ArcaInputError, ArcaServiceError } from "../errors";
 import type { ArcaClientConfig } from "../internal/types";
+import type { SoapTransport } from "../soap";
 import type { WsaaAuthModule } from "../wsaa";
+
+/** Accepted public date inputs for WSFE request fields. */
+export type WsfeDateInput =
+  | `${number}${number}${number}${number}-${number}${number}-${number}${number}`
+  | `${number}${number}${number}${number}${number}${number}${number}${number}`;
 
 /** An associated voucher referenced by a WSFE invoice request. */
 export type WsfeAssociatedVoucher = {
@@ -9,7 +14,7 @@ export type WsfeAssociatedVoucher = {
   salesPoint: number;
   number: number;
   taxId?: string;
-  voucherDate?: string;
+  voucherDate?: WsfeDateInput;
 };
 
 /** A tax (tributo) item in a WSFE invoice request. */
@@ -49,7 +54,7 @@ export type WsfeVoucherInput = {
   documentType: number;
   documentNumber: number;
   receiverVatConditionId?: number;
-  voucherDate: string;
+  voucherDate: WsfeDateInput;
   totalAmount: number;
   nonTaxableAmount: number;
   netAmount: number;
@@ -58,9 +63,9 @@ export type WsfeVoucherInput = {
   vatAmount: number;
   currencyId: string;
   exchangeRate: number;
-  serviceStartDate?: string;
-  serviceEndDate?: string;
-  paymentDueDate?: string;
+  serviceStartDate?: WsfeDateInput;
+  serviceEndDate?: WsfeDateInput;
+  paymentDueDate?: WsfeDateInput;
   associatedVouchers?: WsfeAssociatedVoucher[];
   taxes?: WsfeTax[];
   vatRates?: WsfeVatRate[];
@@ -105,6 +110,16 @@ export type WsfeService = {
     data: WsfeVoucherInput;
   }): Promise<WsfeAuthorizationResult>;
   /** Returns the next available voucher number for the given sales point and type. */
+  getNextVoucherNumber(input: {
+    representedTaxId?: number | string;
+    salesPoint: number;
+    voucherType: number;
+    forceAuthRefresh?: boolean;
+  }): Promise<number>;
+  /**
+   * @deprecated Use `getNextVoucherNumber()` instead.
+   * Returns the next available voucher number, not the last authorized one.
+   */
   getLastVoucher(input: {
     representedTaxId?: number | string;
     salesPoint: number;
@@ -131,11 +146,33 @@ export type CreateWsfeServiceOptions = {
   soap: SoapTransport;
 };
 
+type NormalizedWsfeAssociatedVoucher = Omit<
+  WsfeAssociatedVoucher,
+  "voucherDate"
+> & {
+  voucherDate?: string;
+};
+
+type NormalizedWsfeVoucherInput = Omit<
+  WsfeVoucherInput,
+  | "voucherDate"
+  | "serviceStartDate"
+  | "serviceEndDate"
+  | "paymentDueDate"
+  | "associatedVouchers"
+> & {
+  voucherDate: string;
+  serviceStartDate?: string;
+  serviceEndDate?: string;
+  paymentDueDate?: string;
+  associatedVouchers?: NormalizedWsfeAssociatedVoucher[];
+};
+
 /** Creates a WSFE service instance wired with authentication and SOAP transport. */
 export function createWsfeService(
   options: CreateWsfeServiceOptions
 ): WsfeService {
-  async function getLastVoucher({
+  async function getNextVoucherNumber({
     representedTaxId,
     salesPoint,
     voucherType,
@@ -175,13 +212,15 @@ export function createWsfeService(
 
   return {
     async createNextVoucher({ representedTaxId, data }) {
-      const voucherNumber = await getLastVoucher({
+      const normalizedInput = normalizeWsfeVoucherInput(data);
+
+      const voucherNumber = await getNextVoucherNumber({
         representedTaxId,
-        salesPoint: data.salesPoint,
-        voucherType: data.voucherType,
+        salesPoint: normalizedInput.salesPoint,
+        voucherType: normalizedInput.voucherType,
       });
 
-      const requestData = mapWsfeVoucherInput(data, voucherNumber);
+      const requestData = mapWsfeVoucherInput(normalizedInput, voucherNumber);
 
       const auth = await options.auth.login("wsfe", { representedTaxId });
       const response = await options.soap.execute<
@@ -199,8 +238,8 @@ export function createWsfeService(
           FeCAEReq: {
             FeCabReq: {
               CantReg: 1,
-              PtoVta: data.salesPoint,
-              CbteTipo: data.voucherType,
+              PtoVta: normalizedInput.salesPoint,
+              CbteTipo: normalizedInput.voucherType,
             },
             FeDetReq: {
               FECAEDetRequest: requestData,
@@ -231,7 +270,10 @@ export function createWsfeService(
         raw: result,
       };
     },
-    getLastVoucher,
+    getNextVoucherNumber,
+    getLastVoucher(input) {
+      return getNextVoucherNumber(input);
+    },
     async getSalesPoints({ representedTaxId, forceAuthRefresh }) {
       const auth = await options.auth.login("wsfe", {
         representedTaxId,
@@ -303,7 +345,7 @@ export function createWsfeService(
 }
 
 function mapWsfeVoucherInput(
-  input: WsfeVoucherInput,
+  input: NormalizedWsfeVoucherInput,
   voucherNumber: number
 ): Record<string, unknown> {
   const data: Record<string, unknown> = {
@@ -345,8 +387,8 @@ function mapWsfeVoucherInput(
         Tipo: v.type,
         PtoVta: v.salesPoint,
         Nro: v.number,
-        ...(v.taxId !== undefined ? { Cuit: v.taxId } : {}),
-        ...(v.voucherDate !== undefined ? { CbteFch: v.voucherDate } : {}),
+        ...(v.taxId === undefined ? {} : { Cuit: v.taxId }),
+        ...(v.voucherDate === undefined ? {} : { CbteFch: v.voucherDate }),
       })),
     };
   }
@@ -355,7 +397,7 @@ function mapWsfeVoucherInput(
     data.Tributos = {
       Tributo: input.taxes.map((t) => ({
         Id: t.id,
-        ...(t.description !== undefined ? { Desc: t.description } : {}),
+        ...(t.description === undefined ? {} : { Desc: t.description }),
         BaseImp: t.baseAmount,
         Alic: t.rate,
         Importe: t.amount,
@@ -395,38 +437,162 @@ function mapWsfeVoucherInput(
   return data;
 }
 
+function normalizeWsfeVoucherInput(
+  input: WsfeVoucherInput
+): NormalizedWsfeVoucherInput {
+  const {
+    voucherDate,
+    serviceStartDate,
+    serviceEndDate,
+    paymentDueDate,
+    associatedVouchers,
+    ...rest
+  } = input;
+
+  return {
+    ...rest,
+    voucherDate: normalizeWsfeDateInput(voucherDate, "voucherDate"),
+    ...(serviceStartDate === undefined
+      ? {}
+      : {
+          serviceStartDate: normalizeWsfeDateInput(
+            serviceStartDate,
+            "serviceStartDate"
+          ),
+        }),
+    ...(serviceEndDate === undefined
+      ? {}
+      : {
+          serviceEndDate: normalizeWsfeDateInput(
+            serviceEndDate,
+            "serviceEndDate"
+          ),
+        }),
+    ...(paymentDueDate === undefined
+      ? {}
+      : {
+          paymentDueDate: normalizeWsfeDateInput(
+            paymentDueDate,
+            "paymentDueDate"
+          ),
+        }),
+    ...(associatedVouchers === undefined
+      ? {}
+      : {
+          associatedVouchers: associatedVouchers.map((voucher, index) => {
+            const { voucherDate: associatedVoucherDate, ...associatedRest } =
+              voucher;
+
+            return {
+              ...associatedRest,
+              ...(associatedVoucherDate === undefined
+                ? {}
+                : {
+                    voucherDate: normalizeWsfeDateInput(
+                      associatedVoucherDate,
+                      `associatedVouchers[${index}].voucherDate`
+                    ),
+                  }),
+            };
+          }),
+        }),
+  };
+}
+
+function normalizeWsfeDateInput(
+  value: WsfeDateInput,
+  fieldName: string
+): string {
+  if (typeof value !== "string") {
+    throw new ArcaInputError(
+      `Invalid WSFE ${fieldName}: expected a YYYY-MM-DD or YYYYMMDD string`,
+      {
+        detail: { field: fieldName, value },
+      }
+    );
+  }
+
+  const normalizedValue = value.trim();
+  const afipMatch = normalizedValue.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (afipMatch) {
+    const [, year, month, day] = afipMatch;
+    assertValidCalendarDate(year, month, day, fieldName, normalizedValue);
+    return normalizedValue;
+  }
+
+  const isoMatch = normalizedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    assertValidCalendarDate(year, month, day, fieldName, normalizedValue);
+    return `${year}${month}${day}`;
+  }
+
+  throw new ArcaInputError(
+    `Invalid WSFE ${fieldName}: expected a YYYY-MM-DD or YYYYMMDD string`,
+    {
+      detail: { field: fieldName, value: normalizedValue },
+    }
+  );
+}
+
+function assertValidCalendarDate(
+  yearInput: string,
+  monthInput: string,
+  dayInput: string,
+  fieldName: string,
+  value: string
+) {
+  const year = Number(yearInput);
+  const month = Number(monthInput);
+  const day = Number(dayInput);
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    candidate.getUTCFullYear() !== year ||
+    candidate.getUTCMonth() !== month - 1 ||
+    candidate.getUTCDate() !== day
+  ) {
+    throw new ArcaInputError(
+      `Invalid WSFE ${fieldName}: received a non-existent calendar date`,
+      {
+        detail: { field: fieldName, value },
+      }
+    );
+  }
+}
+
 function mapWsfeSalesPoint(raw: unknown): WsfeSalesPoint {
   const record = raw as Record<string, unknown>;
   return {
     number: Number(record.Nro ?? 0),
-    ...(record.EmisionTipo !== undefined
-      ? { emissionType: String(record.EmisionTipo) }
-      : {}),
-    ...(record.Bloqueado !== undefined
-      ? { blocked: String(record.Bloqueado) }
-      : {}),
-    ...(record.FchBaja !== undefined
-      ? { deletedSince: String(record.FchBaja) }
-      : {}),
+    ...(record.EmisionTipo === undefined
+      ? {}
+      : { emissionType: String(record.EmisionTipo) }),
+    ...(record.Bloqueado === undefined
+      ? {}
+      : { blocked: String(record.Bloqueado) }),
+    ...(record.FchBaja === undefined
+      ? {}
+      : { deletedSince: String(record.FchBaja) }),
   };
 }
 
 function mapWsfeVoucherInfo(raw: Record<string, unknown>): WsfeVoucherInfo {
   return {
     voucherNumber: Number(raw.CbteDesde ?? raw.CbteHasta ?? 0),
-    ...(raw.CbteFch !== undefined ? { voucherDate: String(raw.CbteFch) } : {}),
-    ...(raw.PtoVta !== undefined ? { salesPoint: Number(raw.PtoVta) } : {}),
-    ...(raw.CbteTipo !== undefined
-      ? { voucherType: Number(raw.CbteTipo) }
-      : {}),
-    ...(raw.ImpTotal !== undefined
-      ? { totalAmount: Number(raw.ImpTotal) }
-      : {}),
-    ...(raw.Resultado !== undefined ? { result: String(raw.Resultado) } : {}),
-    ...(raw.CAE !== undefined ? { cae: String(raw.CAE) } : {}),
-    ...(raw.CAEFchVto !== undefined
-      ? { caeExpiry: String(raw.CAEFchVto) }
-      : {}),
+    ...(raw.CbteFch === undefined ? {} : { voucherDate: String(raw.CbteFch) }),
+    ...(raw.PtoVta === undefined ? {} : { salesPoint: Number(raw.PtoVta) }),
+    ...(raw.CbteTipo === undefined
+      ? {}
+      : { voucherType: Number(raw.CbteTipo) }),
+    ...(raw.ImpTotal === undefined
+      ? {}
+      : { totalAmount: Number(raw.ImpTotal) }),
+    ...(raw.Resultado === undefined ? {} : { result: String(raw.Resultado) }),
+    ...(raw.CAE === undefined ? {} : { cae: String(raw.CAE) }),
+    ...(raw.CAEFchVto === undefined
+      ? {}
+      : { caeExpiry: String(raw.CAEFchVto) }),
     raw,
   };
 }

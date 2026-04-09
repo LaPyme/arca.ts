@@ -7,6 +7,5 @@ export type {
   ArcaRepresentedTaxId,
   ArcaServiceName,
   ArcaServiceTarget,
-  ArcaWsaaCacheConfig,
   ArcaWsaaServiceId,
 } from "./internal/types";

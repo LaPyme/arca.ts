@@ -3,6 +3,7 @@ export type {
   WsfeAssociatedVoucher,
   WsfeAuthorizationResult,
   WsfeBuyer,
+  WsfeDateInput,
   WsfeOptionalField,
   WsfeSalesPoint,
   WsfeService,

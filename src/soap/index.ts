@@ -1,15 +1,15 @@
 import { getArcaServiceConfig } from "../config";
 import { postXml } from "../internal/http";
-import {
-  buildSoapEnvelope,
-  getSingleBodyEntry,
-  parseSoapBody,
-} from "../internal/xml";
 import type {
   ArcaClientConfig,
   ArcaSoapExecutionOptions,
   ArcaSoapResponse,
 } from "../internal/types";
+import {
+  buildSoapEnvelope,
+  getSingleBodyEntry,
+  parseSoapBody,
+} from "../internal/xml";
 
 export type SoapTransport = {
   execute<TBody, TResult>(

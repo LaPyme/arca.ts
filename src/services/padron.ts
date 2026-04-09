@@ -1,9 +1,9 @@
 import { ArcaSoapFaultError } from "../errors";
-import type { SoapTransport } from "../soap";
 import type {
   ArcaClientConfig,
   ArcaPadronServiceName,
 } from "../internal/types";
+import type { SoapTransport } from "../soap";
 import type { WsaaAuthModule } from "../wsaa";
 
 /** Result of a taxpayer lookup via Padron A5. */
@@ -61,12 +61,10 @@ export function createPadronService(
         | undefined;
       return {
         taxId: String(record.idPersona ?? ""),
-        ...(record.tipoPersona !== undefined
-          ? { personType: String(record.tipoPersona) }
-          : {}),
-        ...(datosGenerales
-          ? { name: extractPadronName(datosGenerales) }
-          : {}),
+        ...(record.tipoPersona === undefined
+          ? {}
+          : { personType: String(record.tipoPersona) }),
+        ...(datosGenerales ? { name: extractPadronName(datosGenerales) } : {}),
         raw: record,
       };
     },
@@ -86,9 +84,9 @@ export function createPadronService(
       const idPersona = record.idPersona;
       const taxIds = Array.isArray(idPersona)
         ? idPersona.map(String)
-        : idPersona !== undefined
-          ? [String(idPersona)]
-          : [];
+        : idPersona === undefined
+          ? []
+          : [String(idPersona)];
       return {
         taxIds,
         raw: record,

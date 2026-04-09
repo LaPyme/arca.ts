@@ -27,25 +27,12 @@ export type ArcaWsaaServiceId =
 
 export type ArcaSoapVersion = "1.1" | "1.2";
 
-/** WSAA credential cache strategy. Disk mode requires a `directory`. */
-export type ArcaWsaaCacheConfig =
-  | {
-      mode?: "memory";
-    }
-  | {
-      mode: "disk";
-      directory: string;
-    };
-
 /** Configuration required to create an ARCA client. */
 export type ArcaClientConfig = {
   taxId: string;
   certificatePem: string;
   privateKeyPem: string;
   environment: ArcaEnvironment;
-  wsaa?: {
-    cache?: ArcaWsaaCacheConfig;
-  };
 };
 
 /** Credentials returned by a WSAA login. */

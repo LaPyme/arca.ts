@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ArcaConfigurationError,
   ArcaError,
+  ArcaInputError,
   ArcaServiceError,
   ArcaSoapFaultError,
   ArcaTransportError,
@@ -13,6 +14,10 @@ describe("errors", () => {
 
     const baseError = new ArcaError("base", "ARCA_BASE", { cause });
     const configError = new ArcaConfigurationError("config", { cause });
+    const inputError = new ArcaInputError("input", {
+      cause,
+      detail: { field: "voucherDate" },
+    });
     const transportError = new ArcaTransportError("transport", {
       cause,
       statusCode: 500,
@@ -38,6 +43,11 @@ describe("errors", () => {
     expect(configError).toMatchObject({
       name: "ArcaConfigurationError",
       code: "ARCA_CONFIGURATION_ERROR",
+    });
+    expect(inputError).toMatchObject({
+      name: "ArcaInputError",
+      code: "ARCA_INPUT_ERROR",
+      detail: { field: "voucherDate" },
     });
     expect(transportError).toMatchObject({
       name: "ArcaTransportError",

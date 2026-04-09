@@ -18,11 +18,19 @@ export class ArcaConfigurationError extends ArcaError {
   }
 }
 
-class ArcaNotImplementedError extends ArcaError {
-  override readonly name: string = "ArcaNotImplementedError";
+/** Thrown when caller-provided input data is missing or invalid. */
+export class ArcaInputError extends ArcaError {
+  override readonly name: string = "ArcaInputError";
+  readonly detail?: unknown;
 
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, "ARCA_NOT_IMPLEMENTED", options);
+  constructor(
+    message: string,
+    options?: ErrorOptions & {
+      detail?: unknown;
+    }
+  ) {
+    super(message, "ARCA_INPUT_ERROR", options);
+    this.detail = options?.detail;
   }
 }
 

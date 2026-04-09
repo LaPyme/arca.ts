@@ -4,7 +4,6 @@ import type {
   ArcaEnvironment,
   ArcaServiceName,
   ArcaSoapVersion,
-  ArcaWsaaCacheConfig,
 } from "./internal/types";
 
 /** Valid ARCA environment names. */
@@ -16,8 +15,6 @@ export const ARCA_ENV_VARIABLES = {
   certificatePem: "ARCA_CERTIFICATE_PEM",
   privateKeyPem: "ARCA_PRIVATE_KEY_PEM",
   environment: "ARCA_ENVIRONMENT",
-  wsaaCacheMode: "ARCA_WSAA_CACHE_MODE",
-  wsaaCacheDirectory: "ARCA_WSAA_CACHE_DIRECTORY",
 } as const;
 
 type ArcaClientConfigEnvironment = Record<string, string | undefined>;
@@ -55,8 +52,6 @@ export function createArcaClientConfigFromEnv(
   };
   const environmentInput = readEnv(env, variableNames.environment);
   const environmentValue = normalizeEnvironmentValue(environmentInput);
-  const cacheModeInput = readEnv(env, variableNames.wsaaCacheMode);
-  const cacheModeValue = normalizeCacheMode(cacheModeInput);
 
   const config: ArcaClientConfig = {
     taxId: readEnv(env, variableNames.taxId) ?? "",
@@ -68,21 +63,6 @@ export function createArcaClientConfigFromEnv(
       options.defaultEnvironment ??
       "test",
   };
-
-  if (cacheModeValue === "disk" || cacheModeInput === "disk") {
-    config.wsaa = {
-      cache: {
-        mode: (cacheModeValue ?? cacheModeInput) as "disk",
-        directory: readEnv(env, variableNames.wsaaCacheDirectory) ?? "",
-      },
-    };
-  } else if (cacheModeValue === "memory" || cacheModeInput !== undefined) {
-    config.wsaa = {
-      cache: {
-        mode: (cacheModeValue ?? cacheModeInput) as ArcaWsaaCacheConfig["mode"],
-      } as ArcaWsaaCacheConfig,
-    };
-  }
 
   assertArcaClientConfig(config);
   return normalizeArcaClientConfig(config);
@@ -115,21 +95,6 @@ export function assertArcaClientConfig(config: ArcaClientConfig): void {
 
   if (!ARCA_ENVIRONMENTS.includes(normalized.environment)) {
     invalidFields.push("environment");
-  }
-
-  const cacheConfig = config.wsaa?.cache;
-  if (cacheConfig) {
-    const cacheMode = cacheConfig.mode?.trim().toLowerCase() ?? "memory";
-    if (cacheMode !== "memory" && cacheMode !== "disk") {
-      invalidFields.push("wsaa.cache.mode");
-    }
-
-    if (
-      cacheMode === "disk" &&
-      (!("directory" in cacheConfig) || cacheConfig.directory.trim().length < 1)
-    ) {
-      invalidFields.push("wsaa.cache.directory");
-    }
   }
 
   if (invalidFields.length > 0) {
@@ -222,40 +187,12 @@ export function normalizeArcaClientConfig(
 ): ArcaClientConfig {
   const normalizedEnvironment =
     normalizeEnvironmentValue(String(config.environment)) ?? config.environment;
-  const normalizedCache = normalizeWsaaCacheConfig(config.wsaa?.cache);
 
   return {
     taxId: config.taxId.trim(),
     certificatePem: config.certificatePem.trim(),
     privateKeyPem: config.privateKeyPem.trim(),
     environment: normalizedEnvironment,
-    ...(normalizedCache
-      ? {
-          wsaa: {
-            cache: normalizedCache,
-          },
-        }
-      : {}),
-  };
-}
-
-function normalizeWsaaCacheConfig(
-  cache: ArcaWsaaCacheConfig | undefined
-): ArcaWsaaCacheConfig | undefined {
-  if (!cache) {
-    return undefined;
-  }
-
-  const mode = normalizeCacheMode(cache.mode) ?? "memory";
-  if (mode !== "disk") {
-    return {
-      mode: "memory",
-    };
-  }
-
-  return {
-    mode,
-    directory: ("directory" in cache ? cache.directory : "").trim(),
   };
 }
 
@@ -267,19 +204,6 @@ function normalizeEnvironmentValue(value: string | undefined) {
   const normalized = value.trim().toLowerCase();
   if (ARCA_ENVIRONMENTS.includes(normalized as ArcaEnvironment)) {
     return normalized as ArcaEnvironment;
-  }
-
-  return undefined;
-}
-
-function normalizeCacheMode(value: string | undefined) {
-  if (!value) {
-    return undefined;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "memory" || normalized === "disk") {
-    return normalized;
   }
 
   return undefined;

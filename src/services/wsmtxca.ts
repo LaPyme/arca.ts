@@ -1,9 +1,6 @@
 import { ArcaServiceError } from "../errors";
+import type { ArcaClientConfig, ArcaRepresentedTaxId } from "../internal/types";
 import type { SoapTransport } from "../soap";
-import type {
-  ArcaClientConfig,
-  ArcaRepresentedTaxId,
-} from "../internal/types";
 import type { WsaaAuthModule } from "../wsaa";
 
 /** Result of a successful WSMTXCA voucher authorization. */
@@ -97,8 +94,7 @@ export function createWsmtxcaService(
 
       if (resultado === "R" || caeValue == null) {
         throw new ArcaServiceError(
-          messages.join(" | ") ||
-            "WSMTXCA rejected the voucher authorization",
+          messages.join(" | ") || "WSMTXCA rejected the voucher authorization",
           { detail: raw }
         );
       }
@@ -201,8 +197,7 @@ export function createWsmtxcaService(
 
       if (!invoiceDate) {
         throw new ArcaServiceError(
-          messages[0] ??
-            "WSMTXCA did not return the voucher issue date",
+          messages[0] ?? "WSMTXCA did not return the voucher issue date",
           { detail: raw }
         );
       }

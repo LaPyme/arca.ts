@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  ARCA_ENVIRONMENTS,
   ARCA_ENV_VARIABLES,
+  ARCA_ENVIRONMENTS,
   ARCA_WSAA_CONFIG,
   assertArcaClientConfig,
   createArcaClientConfigFromEnv,
@@ -21,8 +21,10 @@ describe("config", () => {
     expect(() =>
       assertArcaClientConfig({
         taxId: "20123456789",
-        certificatePem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
-        privateKeyPem: "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
+        certificatePem:
+          "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+        privateKeyPem:
+          "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
         environment: "test",
       })
     ).not.toThrow();
@@ -43,27 +45,6 @@ describe("config", () => {
     );
   });
 
-  it("requires an explicit directory for disk-backed WSAA cache", () => {
-    expect(() =>
-      assertArcaClientConfig({
-        taxId: "20123456789",
-        certificatePem: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
-        privateKeyPem: "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
-        environment: "test",
-        wsaa: {
-          cache: {
-            mode: "disk",
-            directory: " ",
-          },
-        },
-      })
-    ).toThrowError(
-      new ArcaConfigurationError(
-        "Missing or invalid ARCA client config fields: wsaa.cache.directory"
-      )
-    );
-  });
-
   it("builds a client config from environment variables", () => {
     const envConfig = createArcaClientConfigFromEnv({
       env: {
@@ -72,8 +53,6 @@ describe("config", () => {
           "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
         [ARCA_ENV_VARIABLES.privateKeyPem]:
           "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
-        [ARCA_ENV_VARIABLES.wsaaCacheMode]: "disk",
-        [ARCA_ENV_VARIABLES.wsaaCacheDirectory]: "/tmp/arca-cache",
       },
     });
 
@@ -84,12 +63,6 @@ describe("config", () => {
       privateKeyPem:
         "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
       environment: "test",
-      wsaa: {
-        cache: {
-          mode: "disk",
-          directory: "/tmp/arca-cache",
-        },
-      },
     });
   });
 
