@@ -4,7 +4,7 @@
 [![CI](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml/badge.svg)](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/LaPyme/arca.ts/blob/main/LICENSE)
 
-Type-safe Node.js SDK for [ARCA](https://www.arca.gob.ar/) / AFIP web services: WSAA authentication, WSFE and WSMTXCA electronic invoicing, and Padrón taxpayer lookups. It talks to AFIP endpoints directly (no third-party proxy, no vendor lock-in).
+Type-safe Node.js client for [ARCA](https://www.arca.gob.ar/) / AFIP web services: WSAA authentication, WSFE and WSMTXCA electronic invoicing, and Padrón taxpayer lookups. It talks to AFIP endpoints directly (no third-party proxy, no vendor lock-in).
 
 - **ESM-only**, Node.js **>= 20**
 - **Two runtime dependencies:** `fast-xml-parser`, `node-forge`
