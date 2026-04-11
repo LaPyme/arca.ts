@@ -2,6 +2,7 @@ import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: {
+    constants: "src/constants.ts",
     index: "src/index.ts",
     errors: "src/errors.ts",
     padron: "src/padron.ts",

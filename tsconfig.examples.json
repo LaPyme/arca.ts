@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@lapyme/arca": ["./packages/arca/src/index.ts"],
+      "@lapyme/arca/constants": ["./packages/arca/src/constants.ts"],
+      "@lapyme/arca/errors": ["./packages/arca/src/errors.ts"],
+      "@lapyme/arca/padron": ["./packages/arca/src/padron.ts"],
+      "@lapyme/arca/types": ["./packages/arca/src/types.ts"],
+      "@lapyme/arca/wsfe": ["./packages/arca/src/wsfe.ts"],
+      "@lapyme/arca/wsmtxca": ["./packages/arca/src/wsmtxca.ts"]
+    }
+  },
+  "include": ["examples/**/*.ts"]
+}

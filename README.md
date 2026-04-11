@@ -4,14 +4,14 @@
 [![CI](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml/badge.svg)](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/LaPyme/arca.ts/blob/main/LICENSE)
 
-Type-safe Node.js client for [ARCA](https://www.arca.gob.ar/) / AFIP web services: WSAA authentication, WSFE and WSMTXCA electronic invoicing, and Padrón taxpayer lookups. It talks to AFIP endpoints directly (no third-party proxy, no vendor lock-in).
+Serious Node.js SDK for ARCA / AFIP web services, with a strong WSFE and Padrón experience today and WSMTXCA support preserved. It talks to ARCA endpoints directly, keeps the public API strict and predictable, and avoids pushing SOAP naming into your application code.
 
 - **ESM-only**, Node.js **>= 20**
-- **Two runtime dependencies:** `fast-xml-parser`, `node-forge`
-- **Strict TypeScript** public API; JS-friendly names map to SOAP internally
-- **WSAA:** in-memory ticket cache, deduplicated in-flight logins, recovery for `coe.alreadyAuthenticated`
-- **Resilience:** configurable HTTP timeout, optional retries on transport failures only (never on SOAP faults)
-- **Observability:** optional structured logging (`console` by default, or your own sink)
+- **Direct ARCA integration** with no proxy or hosted dependency
+- **WSAA login handling** with in-memory ticket cache, in-flight deduplication, and recovery for `coe.alreadyAuthenticated`
+- **Strict TypeScript** public API with JS-style field names mapped to SOAP internally
+- **Common ARCA reference data** exported as constants so examples and app code do not need magic numbers
+- **Copy-pasteable examples** designed to be readable by humans and coding agents
 
 ## Install
 
@@ -23,38 +23,36 @@ pnpm add @lapyme/arca
 npm install @lapyme/arca
 ```
 
-## Prerequisites
-
-You need a **CUIT**, a **digital certificate** authorized for the web services you call, and the matching **private key** (PEM). ARCA’s own guides cover certificate creation and service authorization; this package assumes you already have PEM strings or files you can read at runtime.
-
-Use **`test`** until you are ready for production endpoints.
-
 ## Quick start
 
+This example mirrors [examples/factura-b-consumidor-final.ts](./examples/factura-b-consumidor-final.ts).
+
 ```ts
+import { createArcaClient } from "@lapyme/arca";
 import {
-  createArcaClient,
-  createArcaClientConfigFromEnv,
-} from "@lapyme/arca";
+  ARCA_CONCEPT_TYPES,
+  ARCA_CURRENCIES,
+  ARCA_DOCUMENT_TYPES,
+  ARCA_VAT_RATES,
+  ARCA_VOUCHER_TYPES,
+} from "@lapyme/arca/constants";
 
-const client = createArcaClient(
-  createArcaClientConfigFromEnv({
-    defaultEnvironment: "test",
-  })
-);
-
-const nextNumber = await client.wsfe.getNextVoucherNumber({
-  salesPoint: 1,
-  voucherType: 6,
+const client = createArcaClient({
+  taxId: "20123456789",
+  certificatePem:
+    "-----BEGIN CERTIFICATE-----\nREPLACE_WITH_YOUR_CERTIFICATE\n-----END CERTIFICATE-----",
+  privateKeyPem:
+    "-----BEGIN PRIVATE KEY-----\nREPLACE_WITH_YOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----",
+  environment: "test",
 });
 
 const issued = await client.wsfe.createNextVoucher({
   data: {
     salesPoint: 1,
-    voucherType: 6,
-    concept: 1,
-    documentType: 80,
-    documentNumber: 30717329654,
+    voucherType: ARCA_VOUCHER_TYPES.FACTURA_B,
+    concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
+    documentType: ARCA_DOCUMENT_TYPES.DNI,
+    documentNumber: 30123456,
     voucherDate: "2026-05-01",
     totalAmount: 121,
     nonTaxableAmount: 0,
@@ -62,31 +60,105 @@ const issued = await client.wsfe.createNextVoucher({
     exemptAmount: 0,
     taxAmount: 0,
     vatAmount: 21,
-    currencyId: "PES",
+    currencyId: ARCA_CURRENCIES.PES,
     exchangeRate: 1,
-    vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
+    vatRates: [
+      {
+        id: ARCA_VAT_RATES.IVA_21,
+        baseAmount: 100,
+        amount: 21,
+      },
+    ],
   },
 });
 
 console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
 ```
 
-### Environment variables
+## What You Can Do Today
 
-`createArcaClientConfigFromEnv` reads:
+### WSFE
 
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `ARCA_TAX_ID` | Yes | 11-digit CUIT |
-| `ARCA_CERTIFICATE_PEM` | Yes | PEM certificate |
-| `ARCA_PRIVATE_KEY_PEM` | Yes | PEM private key |
-| `ARCA_ENVIRONMENT` | No | `test` or `production`; defaults to `test` if omitted |
+- Issue invoices and credit notes with `client.wsfe.createNextVoucher(...)`
+- Query voucher numbers and voucher details
+- Read ARCA catalogs with methods like `getVoucherTypes()` and `getVatRates()`
+- Check backend health with `getServerStatus()`
 
-For logging verbosity without code changes, set **`ARCA_LOG_LEVEL`** to `debug`, `info`, `warn`, or `error` (see [Logging](#logging)).
+### Padrón
+
+- Look up taxpayer data with `client.padron.getTaxpayerDetails(...)`
+- Resolve CUITs from document numbers with `client.padron.getTaxIdByDocument(...)`
+
+### WSMTXCA
+
+WSMTXCA remains supported and exported, but this package currently puts most editorial focus on WSFE and Padrón. If you need `authorizeVoucher`, `getLastAuthorizedVoucher`, or `getVoucher`, the runtime API is available and covered by tests.
+
+## Examples
+
+Examples live in [examples/](./examples) and are intentionally complete, hardcoded, and readable so they can be adapted quickly by a developer or a coding agent.
+
+- [factura-b-consumidor-final.ts](./examples/factura-b-consumidor-final.ts)
+- [factura-a-responsable-inscripto.ts](./examples/factura-a-responsable-inscripto.ts)
+- [nota-de-credito-asociada.ts](./examples/nota-de-credito-asociada.ts)
+- [factura-servicios-con-periodo.ts](./examples/factura-servicios-con-periodo.ts)
+- [consultar-comprobante.ts](./examples/consultar-comprobante.ts)
+- [consultar-contribuyente.ts](./examples/consultar-contribuyente.ts)
+
+## Manual Setup Reality
+
+This package does **not** provision ARCA credentials for you. You still need to do the official certificate and service setup outside the SDK.
+
+Before using the SDK:
+
+1. Obtain a valid CUIT.
+2. Generate or receive a certificate and matching private key in PEM format.
+3. Authorize the certificate for the target service and environment.
+4. Start with `environment: "test"` and move to production only after end-to-end validation.
+
+Official ARCA / AFIP references:
+
+- [WSAA documentation](https://www.afip.gob.ar/ws/documentacion/wsaa.asp)
+- [Certificates for testing / homologation](https://www.afip.gob.ar/ws/documentacion/certificados.asp)
+- [WSAA developer manual](https://www.afip.gob.ar/ws/WSAA/WSAAmanualDev.pdf)
+- [WSASS service onboarding](https://www.afip.gob.ar/ws/WSASS/WSASS_como_adherirse.pdf)
+- [WSFE developer manual](https://www.afip.gob.ar/ws/documentacion/manuales/manual-desarrollador-ARCA-COMPG-v4-0.pdf)
+
+## Reference Data
+
+The package exports a small, stable set of common ARCA codes from `@lapyme/arca/constants`.
+
+```ts
+import {
+  ARCA_CONCEPT_TYPES,
+  ARCA_CURRENCIES,
+  ARCA_DOCUMENT_TYPES,
+  ARCA_VAT_RATES,
+  ARCA_VOUCHER_TYPES,
+} from "@lapyme/arca/constants";
+
+ARCA_VOUCHER_TYPES.FACTURA_A; // 1
+ARCA_VOUCHER_TYPES.FACTURA_B; // 6
+ARCA_DOCUMENT_TYPES.CUIT; // 80
+ARCA_DOCUMENT_TYPES.DNI; // 96
+ARCA_CONCEPT_TYPES.SERVICIOS; // 2
+ARCA_VAT_RATES.IVA_21; // 5
+ARCA_CURRENCIES.PES; // "PES"
+ARCA_CURRENCIES.DOL; // "DOL"
+```
+
+The constants cover the most common values used by the README and examples:
+
+- voucher types for invoice A/B, debit note A/B, and credit note A/B
+- document types for CUIT and DNI
+- concept types for products, services, and products + services
+- IVA rates for `0`, `10.5`, `21`, and `27`
+- common currencies `PES` and `DOL`
+
+If you need broader catalogs at runtime, WSFE methods such as `getVoucherTypes()`, `getDocumentTypes()`, `getCurrencyTypes()`, and `getVatRates()` are still available.
 
 ## Configuration
 
-Pass an object to `createArcaClient`:
+Pass a config object to `createArcaClient`:
 
 ```ts
 import { createArcaClient } from "@lapyme/arca";
@@ -109,24 +181,27 @@ const client = createArcaClient({
 | `certificatePem` | — | PEM certificate |
 | `privateKeyPem` | — | PEM private key |
 | `environment` | — | `test` or `production` |
-| `timeout` | `30000` | HTTP request timeout (ms) |
-| `retries` | `0` | Extra attempts after a transport failure |
-| `retryDelay` | `500` | Fixed delay (ms) between retries |
-| `logger` | — | See [Logging](#logging) |
+| `timeout` | `30000` | HTTP request timeout in milliseconds |
+| `retries` | `0` | Extra attempts after transport failures only |
+| `retryDelay` | `500` | Delay between transport retries in milliseconds |
+| `logger` | — | Optional structured logger config |
 
-Merge env-based config with overrides when needed:
+### Environment variables
 
-```ts
-const client = createArcaClient({
-  ...createArcaClientConfigFromEnv({ defaultEnvironment: "test" }),
-  retries: 2,
-  timeout: 45_000,
-});
-```
+If you prefer env-based wiring, `createArcaClientConfigFromEnv()` reads:
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `ARCA_TAX_ID` | Yes | 11-digit CUIT |
+| `ARCA_CERTIFICATE_PEM` | Yes | PEM certificate |
+| `ARCA_PRIVATE_KEY_PEM` | Yes | PEM private key |
+| `ARCA_ENVIRONMENT` | No | `test` or `production`; defaults to `test` |
+
+For logging without code changes, set `ARCA_LOG_LEVEL` to `debug`, `info`, `warn`, or `error`.
 
 ## Logging
 
-Default minimum level is **`warn`**. At `debug`, the client logs SOAP requests (service, operation, URL), responses (duration), WSAA login source (cached vs fresh), and retry attempts.
+Default minimum level is `warn`. At `debug`, the SDK logs SOAP requests, response timings, WSAA login source (`cached` vs `fresh`), and retry attempts.
 
 ```ts
 const client = createArcaClient({
@@ -138,7 +213,7 @@ const client = createArcaClient({
 });
 ```
 
-Custom sink (same shape as better-auth style: level + message + args):
+Custom logger sinks receive `(level, message, ...args)`:
 
 ```ts
 const client = createArcaClient({
@@ -149,90 +224,55 @@ const client = createArcaClient({
   logger: {
     level: "info",
     log(level, message, ...args) {
-      // send to your logging pipeline
+      // forward to your logger
     },
   },
 });
 ```
 
-Set **`ARCA_LOG_LEVEL`** when you do not pass `logger.level`. Disable entirely with `logger: { disabled: true }`.
+Disable logging entirely with `logger: { disabled: true }`.
 
 ## Retries and timeouts
 
-Retries apply only to **`ArcaTransportError`** (timeouts, connection failures, non-XML HTTP error responses). Responses that are XML—including HTTP500 with a SOAP **Fault**—are **not** retried; they surface as `ArcaSoapFaultError` or domain errors after parsing.
+Retries apply only to `ArcaTransportError`: timeouts, connection failures, and non-XML HTTP error responses. XML responses, including HTTP 500 SOAP faults, are parsed and surfaced as SOAP or service errors instead of being retried blindly.
 
-## `client.wsfe`
+## Service Surface
 
-WSFE electronic invoicing. Inputs use JS-style names; the library maps to AFIP’s SOAP fields.
+### `client.wsfe`
 
-- WSFE **date** fields accept **`YYYY-MM-DD`** or **`YYYYMMDD`** strings and validate calendar dates.
+WSFE electronic invoicing. Inputs use JS-style names and the SDK maps them to AFIP / ARCA SOAP fields internally.
 
-### Invoicing
+- Date fields accept `YYYY-MM-DD` or `YYYYMMDD`.
+- `createNextVoucher({ data })` resolves the next number and requests CAE in one call.
+- `getVoucherInfo({ number, salesPoint, voucherType })` returns voucher details or `null`.
+- Catalog methods are available for live reference data when you do not want to hardcode values.
 
-| Method | Description |
-| --- | --- |
-| `createNextVoucher({ data })` | Resolves next number and requests CAE; returns `cae`, `caeExpiry`, `voucherNumber`, `raw` |
-| `getNextVoucherNumber({ salesPoint, voucherType })` | Next available voucher number |
-| `getLastVoucher(...)` | Deprecated alias of `getNextVoucherNumber` |
-| `getVoucherInfo({ number, salesPoint, voucherType })` | Voucher details or `null` |
+### `client.padron`
 
-Optional on these calls: `representedTaxId`, `forceAuthRefresh` (where applicable).
+- `getTaxpayerDetails(taxId)` returns taxpayer data or `null`
+- `getTaxIdByDocument(documentNumber)` returns CUIT candidates or `null`
 
-### Points of sale
+Padron "not found" handling currently depends on SOAP fault message text from ARCA and is therefore more fragile than WSFE code-based flows.
 
-| Method | Description |
-| --- | --- |
-| `getSalesPoints({})` | Lists `WsfeSalesPoint[]` |
+### `client.wsmtxca`
 
-### Reference data (catalogs)
+- `authorizeVoucher({ data })`
+- `getLastAuthorizedVoucher({ voucherType, salesPoint })`
+- `getVoucher({ voucherType, salesPoint, voucherNumber })`
 
-| Method | WSFE operation | Returns |
-| --- | --- | --- |
-| `getVoucherTypes` | `FEParamGetTiposCbte` | `WsfeCatalogEntry[]` |
-| `getDocumentTypes` | `FEParamGetTiposDoc` | `WsfeCatalogEntry[]` |
-| `getConceptTypes` | `FEParamGetTiposConcepto` | `WsfeCatalogEntry[]` |
-| `getCurrencyTypes` | `FEParamGetTiposMonedas` | `WsfeCurrencyType[]` |
-| `getVatRates` | `FEParamGetTiposIva` | `WsfeCatalogEntry[]` |
-| `getTaxTypes` | `FEParamGetTiposTributos` | `WsfeCatalogEntry[]` |
-| `getOptionalTypes` | `FEParamGetTiposOpcional` | `WsfeCatalogEntry[]` |
-| `getQuotation({ currencyId })` | `FEParamGetCotizacion` | `WsfeQuotation` |
-
-### Server status
-
-| Method | Description |
-| --- | --- |
-| `getServerStatus()` | `FEDummy` — app, DB, and auth server status (`WsfeServerStatus`); no WSAA ticket required |
-
-## `client.wsmtxca`
-
-Factura de Crédito Electrónica (WSMTXCA).
-
-| Method | Description |
-| --- | --- |
-| `authorizeVoucher({ data })` | `WsmtxcaAuthorizationResult` |
-| `getLastAuthorizedVoucher({ voucherType, salesPoint })` | Last authorized number |
-| `getVoucher({ voucherType, salesPoint, voucherNumber })` | Voucher lookup |
-
-## `client.padron`
-
-| Method | Description |
-| --- | --- |
-| `getTaxpayerDetails(taxId)` | A5 taxpayer details or `null` if not found |
-| `getTaxIdByDocument(documentNumber)` | A13 CUIT list or `null` if not found |
-
-Not-found for Padrón is detected via SOAP fault message text (fragile if AFIP changes wording); see implementation notes in source.
+The runtime support is stable and public. It is simply not the main documentation path in this SDK-focused pass.
 
 ## Error handling
 
-All errors extend **`ArcaError`** (`code` string). Specialize with `instanceof`:
+All errors extend `ArcaError` and expose a stable `code` string.
 
 | Class | When |
 | --- | --- |
 | `ArcaConfigurationError` | Invalid client config |
-| `ArcaInputError` | Invalid caller input (e.g. bad date string) |
-| `ArcaTransportError` | HTTP/transport failure (`statusCode`, `responseBody` optional) |
-| `ArcaSoapFaultError` | SOAP Fault (`faultCode`, `detail` optional) |
-| `ArcaServiceError` | WSFE-style business errors (`serviceCode`, `detail` optional) |
+| `ArcaInputError` | Invalid caller input such as a malformed date |
+| `ArcaTransportError` | HTTP or transport failure |
+| `ArcaSoapFaultError` | SOAP fault returned by ARCA |
+| `ArcaServiceError` | Business-level service rejection, especially WSFE-style errors |
 
 ```ts
 import {
@@ -257,41 +297,63 @@ try {
 
 Import error classes from `@lapyme/arca` or `@lapyme/arca/errors`.
 
+## Troubleshooting
+
+- `coe.alreadyAuthenticated`: the SDK already deduplicates in-flight WSAA logins and reuses valid cached tickets. If you still hit this repeatedly, avoid forcing fresh auth unnecessarily and check whether another process is racing with the same certificate.
+- `dh key too small`: WSFE production requests already use a legacy OpenSSL security level where needed. If you still see this, confirm you are not bypassing the SDK transport or terminating TLS in another layer.
+- Expired certificate: replace the PEM certificate with a renewed one that matches the same private key expectations, then redeploy or restart the process.
+- Unauthorized service: your certificate may be valid but not authorized for the target service or environment. Re-check WSASS / homologation setup for test and service relationships for production.
+- WSFE `10015`: usually means the `DocTipo` / `DocNro` combination is inconsistent for the voucher type and amount. For example, Factura B has special receiver-document rules depending on the total amount.
+- WSFE `10016`: the voucher number sent in `CbteDesde` is not the next valid one for that point of sale and voucher type. Call `getNextVoucherNumber()` immediately before authorizing when your numbering may have moved.
+
+When an error is unclear, check these in order:
+
+1. Certificate and private key match.
+2. Environment is correct (`test` vs `production`).
+3. Service authorization was done for that environment.
+4. The voucher type, document type, and amount combination is valid.
+5. Your process is not reusing stale assumptions about the next voucher number.
+
 ## Public API (semver)
 
 Documented entrypoints:
 
 - `@lapyme/arca`
+- `@lapyme/arca/constants`
 - `@lapyme/arca/wsfe`
 - `@lapyme/arca/wsmtxca`
 - `@lapyme/arca/padron`
 - `@lapyme/arca/errors`
 - `@lapyme/arca/types`
 
-Low-level SOAP, HTTP, and WSAA internals are **not** part of the semver contract.
+Low-level SOAP, HTTP, and WSAA internals are not part of the semver contract.
 
 Subpath example:
 
 ```ts
 import { createWsfeService } from "@lapyme/arca/wsfe";
+import { ARCA_VOUCHER_TYPES } from "@lapyme/arca/constants";
 import { ArcaServiceError } from "@lapyme/arca/errors";
-import type { WsfeVoucherInput } from "@lapyme/arca/wsfe";
 ```
 
 ## Security
 
-- Treat certificate and private key as secrets.
-- WSAA tickets are cached **in memory only**; this package does not write credentials to disk.
+- Treat certificates and private keys as secrets.
+- WSAA tickets are cached in memory only.
+- This package does not write credentials to disk.
 
 ## Development
 
 ```bash
 pnpm install
 pnpm typecheck
+pnpm typecheck:examples
 pnpm test
 pnpm test:coverage
 pnpm pack:check
 ```
+
+Optional for local DX: install Turbo globally with `pnpm add --global turbo`. The repo scripts still use the local workspace version.
 
 ## License
 

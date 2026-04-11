@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createArcaClient } from "./client";
+import * as constantsBarrel from "./constants";
 import * as arca from "./index";
 import * as padronBarrel from "./padron";
 import { createPadronService } from "./services/padron";
@@ -20,5 +21,10 @@ describe("barrel exports", () => {
     expect(wsmtxcaBarrel.createWsmtxcaService).toBe(createWsmtxcaService);
     expect(arca.ARCA_ENVIRONMENTS).toEqual(["production", "test"]);
     expect(arca.ARCA_ENV_VARIABLES.environment).toBe("ARCA_ENVIRONMENT");
+    expect(constantsBarrel.ARCA_VOUCHER_TYPES.FACTURA_B).toBe(6);
+    expect(constantsBarrel.ARCA_DOCUMENT_TYPES.CUIT).toBe(80);
+    expect(constantsBarrel.ARCA_CONCEPT_TYPES.SERVICIOS).toBe(2);
+    expect(constantsBarrel.ARCA_VAT_RATES.IVA_21).toBe(5);
+    expect(constantsBarrel.ARCA_CURRENCIES.PES).toBe("PES");
   });
 });
