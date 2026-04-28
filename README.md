@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@lapyme/arca.svg)](https://www.npmjs.com/package/@lapyme/arca)
 [![CI](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml/badge.svg)](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/LaPyme/arca.ts/blob/main/LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://github.com/LaPyme/arca.ts/blob/main/LICENSE)
 
 Serious Node.js SDK for ARCA / AFIP web services, with a strong WSFE and Padrón experience today and WSMTXCA support preserved. It talks to ARCA endpoints directly, keeps the public API strict and predictable, and avoids pushing SOAP naming into your application code.
 
@@ -357,4 +357,4 @@ Optional for local DX: install Turbo globally with `pnpm add --global turbo`. Th
 
 ## License
 
-MIT
+Apache-2.0

@@ -1,9 +1,9 @@
 {
   "name": "@lapyme/arca",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Node.js client for ARCA services including WSFE, WSMTXCA, and padron lookups.",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "Lapyme",
   "homepage": "https://github.com/LaPyme/arca.ts#readme",
   "repository": {
