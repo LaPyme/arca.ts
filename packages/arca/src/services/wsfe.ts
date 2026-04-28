@@ -17,6 +17,12 @@ export type WsfeAssociatedVoucher = {
   voucherDate?: WsfeDateInput;
 };
 
+/** An associated period used by WSFE credit/debit notes without associated vouchers. */
+export type WsfeAssociatedPeriod = {
+  startDate: WsfeDateInput;
+  endDate: WsfeDateInput;
+};
+
 /** A tax (tributo) item in a WSFE invoice request. */
 export type WsfeTax = {
   id: number;
@@ -46,6 +52,11 @@ export type WsfeBuyer = {
   percentage: number;
 };
 
+/** An activity associated with a WSFE invoice request. */
+export type WsfeActivity = {
+  id: number;
+};
+
 /** Input data for creating a new WSFE voucher via {@link WsfeService.createNextVoucher}. */
 export type WsfeVoucherInput = {
   salesPoint: number;
@@ -63,14 +74,17 @@ export type WsfeVoucherInput = {
   vatAmount: number;
   currencyId: string;
   exchangeRate: number;
+  sameCurrencyForeignCancellation?: "S" | "N";
   serviceStartDate?: WsfeDateInput;
   serviceEndDate?: WsfeDateInput;
   paymentDueDate?: WsfeDateInput;
   associatedVouchers?: WsfeAssociatedVoucher[];
+  associatedPeriod?: WsfeAssociatedPeriod;
   taxes?: WsfeTax[];
   vatRates?: WsfeVatRate[];
   optionalFields?: WsfeOptionalField[];
   buyers?: WsfeBuyer[];
+  activities?: WsfeActivity[];
 };
 
 /** Result of a successful WSFE voucher authorization. */
@@ -105,6 +119,14 @@ export type WsfeVoucherInfo = {
 export type WsfeCatalogEntry = {
   id: number;
   description: string;
+};
+
+export type WsfeActivityType = WsfeCatalogEntry & {
+  order: number;
+};
+
+export type WsfeReceiverVatCondition = WsfeCatalogEntry & {
+  voucherClass: string;
 };
 
 export type WsfeCurrencyType = {
@@ -190,6 +212,17 @@ export type WsfeService = {
     representedTaxId?: number | string;
     forceAuthRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
+  /** Lists activities enabled for the taxpayer. */
+  getActivities(input: {
+    representedTaxId?: number | string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeActivityType[]>;
+  /** Lists receiver VAT condition values accepted by WSFE. */
+  getReceiverVatConditions(input: {
+    representedTaxId?: number | string;
+    voucherClass?: string;
+    forceAuthRefresh?: boolean;
+  }): Promise<WsfeReceiverVatCondition[]>;
   /** Reports WSFE backend status without requiring taxpayer authorization. */
   getServerStatus(): Promise<WsfeServerStatus>;
   /** Returns the exchange rate for a given currency. */
@@ -220,6 +253,11 @@ type NormalizedWsfeAssociatedVoucher = Omit<
   voucherDate?: string;
 };
 
+type NormalizedWsfeAssociatedPeriod = {
+  startDate: string;
+  endDate: string;
+};
+
 type NormalizedWsfeVoucherInput = Omit<
   WsfeVoucherInput,
   | "voucherDate"
@@ -227,12 +265,14 @@ type NormalizedWsfeVoucherInput = Omit<
   | "serviceEndDate"
   | "paymentDueDate"
   | "associatedVouchers"
+  | "associatedPeriod"
 > & {
   voucherDate: string;
   serviceStartDate?: string;
   serviceEndDate?: string;
   paymentDueDate?: string;
   associatedVouchers?: NormalizedWsfeAssociatedVoucher[];
+  associatedPeriod?: NormalizedWsfeAssociatedPeriod;
 };
 
 /** Creates a WSFE service instance wired with authentication and SOAP transport. */
@@ -435,6 +475,37 @@ export function createWsfeService(
     getOptionalTypes(input) {
       return getWsfeCatalog("FEParamGetTiposOpcional", "OpcionalTipo", input);
     },
+    async getActivities({ representedTaxId, forceAuthRefresh }) {
+      const result = await executeWsfeAuthenticatedOperation(
+        "FEParamGetActividades",
+        {
+          representedTaxId,
+          forceAuthRefresh,
+        }
+      );
+      return getWsfeResultEntries(result, "ActividadesTipo").map(
+        mapWsfeActivityType
+      );
+    },
+    async getReceiverVatConditions({
+      representedTaxId,
+      voucherClass,
+      forceAuthRefresh,
+    }) {
+      const result = await executeWsfeAuthenticatedOperation(
+        "FEParamGetCondicionIvaReceptor",
+        {
+          representedTaxId,
+          forceAuthRefresh,
+        },
+        {
+          ...(voucherClass === undefined ? {} : { ClaseCmp: voucherClass }),
+        }
+      );
+      return getWsfeResultEntries(result, "CondicionIvaReceptor").map(
+        mapWsfeReceiverVatCondition
+      );
+    },
     async getServerStatus() {
       const result = await executeWsfeOperation("FEDummy");
       return mapWsfeServerStatus(result);
@@ -509,6 +580,10 @@ function mapWsfeVoucherInput(
     data.CondicionIVAReceptorId = input.receiverVatConditionId;
   }
 
+  if (input.sameCurrencyForeignCancellation !== undefined) {
+    data.CanMisMonExt = input.sameCurrencyForeignCancellation;
+  }
+
   if (input.serviceStartDate !== undefined) {
     data.FchServDesde = input.serviceStartDate;
   }
@@ -528,6 +603,13 @@ function mapWsfeVoucherInput(
         ...(v.taxId === undefined ? {} : { Cuit: v.taxId }),
         ...(v.voucherDate === undefined ? {} : { CbteFch: v.voucherDate }),
       })),
+    };
+  }
+
+  if (input.associatedPeriod) {
+    data.PeriodoAsoc = {
+      FchDesde: input.associatedPeriod.startDate,
+      FchHasta: input.associatedPeriod.endDate,
     };
   }
 
@@ -572,6 +654,14 @@ function mapWsfeVoucherInput(
     };
   }
 
+  if (input.activities) {
+    data.Actividades = {
+      Actividad: input.activities.map((a) => ({
+        Id: a.id,
+      })),
+    };
+  }
+
   return data;
 }
 
@@ -584,6 +674,7 @@ function normalizeWsfeVoucherInput(
     serviceEndDate,
     paymentDueDate,
     associatedVouchers,
+    associatedPeriod,
     ...rest
   } = input;
 
@@ -633,6 +724,20 @@ function normalizeWsfeVoucherInput(
                   }),
             };
           }),
+        }),
+    ...(associatedPeriod === undefined
+      ? {}
+      : {
+          associatedPeriod: {
+            startDate: normalizeWsfeDateInput(
+              associatedPeriod.startDate,
+              "associatedPeriod.startDate"
+            ),
+            endDate: normalizeWsfeDateInput(
+              associatedPeriod.endDate,
+              "associatedPeriod.endDate"
+            ),
+          },
         }),
   };
 }
@@ -720,6 +825,24 @@ function mapWsfeCatalogEntry(raw: unknown): WsfeCatalogEntry {
   return {
     id: Number(record.Id ?? 0),
     description: String(record.Desc ?? ""),
+  };
+}
+
+function mapWsfeActivityType(raw: unknown): WsfeActivityType {
+  const record = raw as Record<string, unknown>;
+  return {
+    id: Number(record.Id ?? 0),
+    description: String(record.Desc ?? ""),
+    order: Number(record.Orden ?? 0),
+  };
+}
+
+function mapWsfeReceiverVatCondition(raw: unknown): WsfeReceiverVatCondition {
+  const record = raw as Record<string, unknown>;
+  return {
+    id: Number(record.Id ?? 0),
+    description: String(record.Desc ?? ""),
+    voucherClass: String(record.Cmp_Clase ?? ""),
   };
 }
 

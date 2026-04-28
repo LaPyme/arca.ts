@@ -1,5 +1,8 @@
 export type {
   CreateWsfeServiceOptions,
+  WsfeActivity,
+  WsfeActivityType,
+  WsfeAssociatedPeriod,
   WsfeAssociatedVoucher,
   WsfeAuthorizationResult,
   WsfeBuyer,
@@ -8,6 +11,7 @@ export type {
   WsfeDateInput,
   WsfeOptionalField,
   WsfeQuotation,
+  WsfeReceiverVatCondition,
   WsfeSalesPoint,
   WsfeServerStatus,
   WsfeService,

@@ -28,3 +28,19 @@ The package exports:
 - `@lapyme/arca/padron`
 - `@lapyme/arca/errors`
 - `@lapyme/arca/types`
+
+## WSFE associated periods
+
+`client.wsfe.createNextVoucher({ data })` supports `associatedPeriod` for credit/debit notes that use `PeriodoAsoc` instead of `CbtesAsoc`:
+
+```ts
+await client.wsfe.createNextVoucher({
+  data: {
+    // other voucher fields...
+    associatedPeriod: {
+      startDate: "2026-05-01",
+      endDate: "2026-05-31",
+    },
+  },
+});
+```

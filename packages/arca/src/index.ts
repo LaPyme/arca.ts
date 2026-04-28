@@ -26,6 +26,9 @@ export type {
 export { createPadronService } from "./services/padron";
 export type {
   CreateWsfeServiceOptions,
+  WsfeActivity,
+  WsfeActivityType,
+  WsfeAssociatedPeriod,
   WsfeAssociatedVoucher,
   WsfeAuthorizationResult,
   WsfeBuyer,
@@ -34,6 +37,7 @@ export type {
   WsfeDateInput,
   WsfeOptionalField,
   WsfeQuotation,
+  WsfeReceiverVatCondition,
   WsfeSalesPoint,
   WsfeServerStatus,
   WsfeService,

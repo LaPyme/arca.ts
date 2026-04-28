@@ -1,6 +1,6 @@
 {
   "name": "@lapyme/arca",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Node.js client for ARCA services including WSFE, WSMTXCA, and padron lookups.",
   "type": "module",
   "license": "MIT",

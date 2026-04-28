@@ -101,6 +101,8 @@ describe("createWsfeService", () => {
         taxes: [{ id: 99, baseAmount: 100, rate: 10, amount: 10 }],
         vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
         optionalFields: [{ id: "27", value: "test" }],
+        activities: [{ id: 46_123 }],
+        sameCurrencyForeignCancellation: "S",
       }),
     });
 
@@ -147,6 +149,7 @@ describe("createWsfeService", () => {
               CbteDesde: 42,
               CbteHasta: 42,
               CondicionIVAReceptorId: 5,
+              CanMisMonExt: "S",
               CbtesAsoc: {
                 CbteAsoc: [{ Tipo: 1, PtoVta: 1, Nro: 1 }],
               },
@@ -158,6 +161,9 @@ describe("createWsfeService", () => {
               },
               Opcionales: {
                 Opcional: [{ Id: "27", Valor: "test" }],
+              },
+              Actividades: {
+                Actividad: [{ Id: 46_123 }],
               },
             },
           },
@@ -235,6 +241,86 @@ describe("createWsfeService", () => {
         },
       },
     });
+  });
+
+  it("sends PeriodoAsoc with normalized dates when provided", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockResolvedValueOnce({
+        result: {
+          FECompUltimoAutorizadoResponse: {
+            FECompUltimoAutorizadoResult: {
+              CbteNro: 41,
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          FECAESolicitarResponse: {
+            FECAESolicitarResult: {
+              FeDetResp: {
+                FECAEDetResponse: [
+                  {
+                    Resultado: "A",
+                    CAE: "123456789",
+                    CAEFchVto: "20260501",
+                  },
+                ],
+              },
+            },
+          },
+        },
+      });
+
+    const service = createWsfeService(options);
+    await service.createNextVoucher({
+      data: createBaseVoucherInput({
+        associatedPeriod: {
+          startDate: "2026-05-01",
+          endDate: "20260531",
+        },
+      }),
+    });
+
+    expect(options.soap.execute.mock.calls[1]?.[0]).toMatchObject({
+      body: {
+        FeCAEReq: {
+          FeDetReq: {
+            FECAEDetRequest: {
+              PeriodoAsoc: {
+                FchDesde: "20260501",
+                FchHasta: "20260531",
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("rejects invalid associated period dates before SOAP calls", async () => {
+    const options = createBaseOptions();
+    const service = createWsfeService(options);
+
+    await expect(
+      service.createNextVoucher({
+        data: createBaseVoucherInput({
+          associatedPeriod: {
+            startDate: "05/01/2026" as never,
+            endDate: "20260531",
+          },
+        }),
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaInputError",
+      code: "ARCA_INPUT_ERROR",
+      message:
+        "Invalid WSFE associatedPeriod.startDate: expected a YYYY-MM-DD or YYYYMMDD string",
+    });
+
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).not.toHaveBeenCalled();
   });
 
   it("allows destructuring without breaking createNextVoucher", async () => {
@@ -636,6 +722,98 @@ describe("createWsfeService", () => {
           Sign: "sign",
           Cuit: 20_304_050_607,
         },
+      },
+    });
+  });
+
+  it("retrieves activities", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FEParamGetActividades", {
+        ResultGet: {
+          ActividadesTipo: {
+            Id: "46123",
+            Orden: "1",
+            Desc: "Venta al por menor",
+          },
+        },
+      })
+    );
+
+    const service = createWsfeService(options);
+
+    await expect(
+      service.getActivities({
+        representedTaxId: "20304050607",
+        forceAuthRefresh: true,
+      })
+    ).resolves.toEqual([
+      {
+        id: 46_123,
+        description: "Venta al por menor",
+        order: 1,
+      },
+    ]);
+    expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+    });
+    expect(options.soap.execute).toHaveBeenCalledWith({
+      service: "wsfe",
+      operation: "FEParamGetActividades",
+      body: {
+        Auth: {
+          Token: "token",
+          Sign: "sign",
+          Cuit: 20_304_050_607,
+        },
+      },
+    });
+  });
+
+  it("retrieves receiver VAT conditions", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FEParamGetCondicionIvaReceptor", {
+        ResultGet: {
+          CondicionIvaReceptor: {
+            Id: "1",
+            Desc: "IVA Responsable Inscripto",
+            Cmp_Clase: "A",
+          },
+        },
+      })
+    );
+
+    const service = createWsfeService(options);
+
+    await expect(
+      service.getReceiverVatConditions({
+        representedTaxId: "20304050607",
+        voucherClass: "A",
+        forceAuthRefresh: true,
+      })
+    ).resolves.toEqual([
+      {
+        id: 1,
+        description: "IVA Responsable Inscripto",
+        voucherClass: "A",
+      },
+    ]);
+    expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+    });
+    expect(options.soap.execute).toHaveBeenCalledWith({
+      service: "wsfe",
+      operation: "FEParamGetCondicionIvaReceptor",
+      body: {
+        Auth: {
+          Token: "token",
+          Sign: "sign",
+          Cuit: 20_304_050_607,
+        },
+        ClaseCmp: "A",
       },
     });
   });
