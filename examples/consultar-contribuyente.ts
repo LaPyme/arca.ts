@@ -1,4 +1,4 @@
-import { createArcaClient } from "@lapyme/arca";
+import { createArcaClient } from "facturas";
 
 const client = createArcaClient({
   taxId: "20123456789",

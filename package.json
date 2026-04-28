@@ -1,5 +1,5 @@
 {
-  "name": "arcats-workspace",
+  "name": "facturas-workspace",
   "private": true,
   "packageManager": "pnpm@10.28.0",
   "scripts": {
@@ -7,10 +7,10 @@
     "typecheck": "pnpm exec turbo typecheck && pnpm typecheck:examples",
     "typecheck:examples": "pnpm exec tsc --project tsconfig.examples.json --noEmit",
     "test": "pnpm exec turbo test",
-    "test:coverage": "pnpm --filter @lapyme/arca test:coverage",
+    "test:coverage": "pnpm --filter facturas test:coverage",
     "check": "pnpm exec ultracite check",
     "fix": "pnpm exec ultracite fix",
-    "pack:check": "pnpm --filter @lapyme/arca pack:check"
+    "pack:check": "pnpm --filter facturas pack:check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.10",

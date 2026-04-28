@@ -1,11 +1,11 @@
-import { createArcaClient } from "@lapyme/arca";
+import { createArcaClient } from "facturas";
 import {
   ARCA_CONCEPT_TYPES,
   ARCA_CURRENCIES,
   ARCA_DOCUMENT_TYPES,
   ARCA_VAT_RATES,
   ARCA_VOUCHER_TYPES,
-} from "@lapyme/arca/constants";
+} from "facturas/constants";
 
 const client = createArcaClient({
   taxId: "20123456789",

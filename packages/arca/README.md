@@ -1,15 +1,15 @@
-# @lapyme/arca
+# facturas
 
 Serious Node.js SDK for ARCA / AFIP web services, with strong WSFE and Padrón coverage and preserved WSMTXCA support.
 
 ## Install
 
 ```bash
-pnpm add @lapyme/arca
+pnpm add facturas
 ```
 
 ```bash
-npm install @lapyme/arca
+npm install facturas
 ```
 
 ## Documentation
@@ -21,13 +21,13 @@ For the full quick start, troubleshooting, and examples, see the repository docs
 
 The package exports:
 
-- `@lapyme/arca`
-- `@lapyme/arca/constants`
-- `@lapyme/arca/wsfe`
-- `@lapyme/arca/wsmtxca`
-- `@lapyme/arca/padron`
-- `@lapyme/arca/errors`
-- `@lapyme/arca/types`
+- `facturas`
+- `facturas/constants`
+- `facturas/wsfe`
+- `facturas/wsmtxca`
+- `facturas/padron`
+- `facturas/errors`
+- `facturas/types`
 
 ## WSFE associated periods
 

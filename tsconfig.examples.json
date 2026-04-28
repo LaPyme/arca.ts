@@ -3,13 +3,13 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@lapyme/arca": ["./packages/arca/src/index.ts"],
-      "@lapyme/arca/constants": ["./packages/arca/src/constants.ts"],
-      "@lapyme/arca/errors": ["./packages/arca/src/errors.ts"],
-      "@lapyme/arca/padron": ["./packages/arca/src/padron.ts"],
-      "@lapyme/arca/types": ["./packages/arca/src/types.ts"],
-      "@lapyme/arca/wsfe": ["./packages/arca/src/wsfe.ts"],
-      "@lapyme/arca/wsmtxca": ["./packages/arca/src/wsmtxca.ts"]
+      "facturas": ["./packages/arca/src/index.ts"],
+      "facturas/constants": ["./packages/arca/src/constants.ts"],
+      "facturas/errors": ["./packages/arca/src/errors.ts"],
+      "facturas/padron": ["./packages/arca/src/padron.ts"],
+      "facturas/types": ["./packages/arca/src/types.ts"],
+      "facturas/wsfe": ["./packages/arca/src/wsfe.ts"],
+      "facturas/wsmtxca": ["./packages/arca/src/wsmtxca.ts"]
     }
   },
   "include": ["examples/**/*.ts"]

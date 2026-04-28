@@ -1,6 +1,6 @@
 # arca.ts
 
-[![npm version](https://img.shields.io/npm/v/@lapyme/arca.svg)](https://www.npmjs.com/package/@lapyme/arca)
+[![npm version](https://img.shields.io/npm/v/facturas.svg)](https://www.npmjs.com/package/facturas)
 [![CI](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml/badge.svg)](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://github.com/LaPyme/arca.ts/blob/main/LICENSE)
 
@@ -16,11 +16,11 @@ Serious Node.js SDK for ARCA / AFIP web services, with a strong WSFE and Padrón
 ## Install
 
 ```bash
-pnpm add @lapyme/arca
+pnpm add facturas
 ```
 
 ```bash
-npm install @lapyme/arca
+npm install facturas
 ```
 
 ## Quick start
@@ -28,14 +28,14 @@ npm install @lapyme/arca
 This example mirrors [examples/factura-b-consumidor-final.ts](./examples/factura-b-consumidor-final.ts).
 
 ```ts
-import { createArcaClient } from "@lapyme/arca";
+import { createArcaClient } from "facturas";
 import {
   ARCA_CONCEPT_TYPES,
   ARCA_CURRENCIES,
   ARCA_DOCUMENT_TYPES,
   ARCA_VAT_RATES,
   ARCA_VOUCHER_TYPES,
-} from "@lapyme/arca/constants";
+} from "facturas/constants";
 
 const client = createArcaClient({
   taxId: "20123456789",
@@ -125,7 +125,7 @@ Official ARCA / AFIP references:
 
 ## Reference Data
 
-The package exports a small, stable set of common ARCA codes from `@lapyme/arca/constants`.
+The package exports a small, stable set of common ARCA codes from `facturas/constants`.
 
 ```ts
 import {
@@ -134,7 +134,7 @@ import {
   ARCA_DOCUMENT_TYPES,
   ARCA_VAT_RATES,
   ARCA_VOUCHER_TYPES,
-} from "@lapyme/arca/constants";
+} from "facturas/constants";
 
 ARCA_VOUCHER_TYPES.FACTURA_A; // 1
 ARCA_VOUCHER_TYPES.FACTURA_B; // 6
@@ -161,7 +161,7 @@ If you need broader catalogs at runtime, WSFE methods such as `getVoucherTypes()
 Pass a config object to `createArcaClient`:
 
 ```ts
-import { createArcaClient } from "@lapyme/arca";
+import { createArcaClient } from "facturas";
 
 const client = createArcaClient({
   taxId: "20123456789",
@@ -279,7 +279,7 @@ import {
   ArcaServiceError,
   ArcaSoapFaultError,
   ArcaTransportError,
-} from "@lapyme/arca";
+} from "facturas";
 
 try {
   await client.wsfe.createNextVoucher({ data: /* ... */ });
@@ -295,7 +295,7 @@ try {
 }
 ```
 
-Import error classes from `@lapyme/arca` or `@lapyme/arca/errors`.
+Import error classes from `facturas` or `facturas/errors`.
 
 ## Troubleshooting
 
@@ -318,22 +318,22 @@ When an error is unclear, check these in order:
 
 Documented entrypoints:
 
-- `@lapyme/arca`
-- `@lapyme/arca/constants`
-- `@lapyme/arca/wsfe`
-- `@lapyme/arca/wsmtxca`
-- `@lapyme/arca/padron`
-- `@lapyme/arca/errors`
-- `@lapyme/arca/types`
+- `facturas`
+- `facturas/constants`
+- `facturas/wsfe`
+- `facturas/wsmtxca`
+- `facturas/padron`
+- `facturas/errors`
+- `facturas/types`
 
 Low-level SOAP, HTTP, and WSAA internals are not part of the semver contract.
 
 Subpath example:
 
 ```ts
-import { createWsfeService } from "@lapyme/arca/wsfe";
-import { ARCA_VOUCHER_TYPES } from "@lapyme/arca/constants";
-import { ArcaServiceError } from "@lapyme/arca/errors";
+import { createWsfeService } from "facturas/wsfe";
+import { ARCA_VOUCHER_TYPES } from "facturas/constants";
+import { ArcaServiceError } from "facturas/errors";
 ```
 
 ## Security

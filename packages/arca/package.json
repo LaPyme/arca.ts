@@ -1,5 +1,5 @@
 {
-  "name": "@lapyme/arca",
+  "name": "facturas",
   "version": "0.4.0",
   "description": "Node.js client for ARCA services including WSFE, WSMTXCA, and padron lookups.",
   "type": "module",
