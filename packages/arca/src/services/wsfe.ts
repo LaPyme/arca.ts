@@ -73,7 +73,7 @@ export type WsfeVoucherInput = {
   taxAmount: number;
   vatAmount: number;
   currencyId: string;
-  exchangeRate: number;
+  exchangeRate?: number;
   sameCurrencyForeignCancellation?: "S" | "N";
   serviceStartDate?: WsfeDateInput;
   serviceEndDate?: WsfeDateInput;
@@ -557,6 +557,18 @@ function mapWsfeVoucherInput(
   input: NormalizedWsfeVoucherInput,
   voucherNumber: number
 ): Record<string, unknown> {
+  const sendsSameForeignCurrencyCancellation =
+    input.currencyId !== "PES" && input.sameCurrencyForeignCancellation === "S";
+
+  if (
+    input.exchangeRate === undefined &&
+    !sendsSameForeignCurrencyCancellation
+  ) {
+    throw new ArcaInputError(
+      "exchangeRate is required unless sameCurrencyForeignCancellation is S for a foreign-currency voucher."
+    );
+  }
+
   const data: Record<string, unknown> = {
     Concepto: input.concept,
     DocTipo: input.documentType,
@@ -571,16 +583,22 @@ function mapWsfeVoucherInput(
     ImpTrib: input.taxAmount,
     ImpIVA: input.vatAmount,
     MonId: input.currencyId,
-    MonCotiz: input.exchangeRate,
     PtoVta: input.salesPoint,
     CbteTipo: input.voucherType,
   };
+
+  if (!sendsSameForeignCurrencyCancellation) {
+    data.MonCotiz = input.exchangeRate;
+  }
 
   if (input.receiverVatConditionId !== undefined) {
     data.CondicionIVAReceptorId = input.receiverVatConditionId;
   }
 
-  if (input.sameCurrencyForeignCancellation !== undefined) {
+  if (
+    input.currencyId !== "PES" &&
+    input.sameCurrencyForeignCancellation !== undefined
+  ) {
     data.CanMisMonExt = input.sameCurrencyForeignCancellation;
   }
 

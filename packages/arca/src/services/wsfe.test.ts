@@ -97,6 +97,7 @@ describe("createWsfeService", () => {
     const result = await service.createNextVoucher({
       representedTaxId: "20304050607",
       data: createBaseVoucherInput({
+        currencyId: "USD",
         associatedVouchers: [{ type: 1, salesPoint: 1, number: 1 }],
         taxes: [{ id: 99, baseAmount: 100, rate: 10, amount: 10 }],
         vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
@@ -150,6 +151,7 @@ describe("createWsfeService", () => {
               CbteHasta: 42,
               CondicionIVAReceptorId: 5,
               CanMisMonExt: "S",
+              MonId: "USD",
               CbtesAsoc: {
                 CbteAsoc: [{ Tipo: 1, PtoVta: 1, Nro: 1 }],
               },
@@ -170,6 +172,100 @@ describe("createWsfeService", () => {
         },
       },
     });
+  });
+
+  it("omits MonCotiz when foreign-currency vouchers are cancelled in the same currency", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockResolvedValueOnce({
+        result: {
+          FECompUltimoAutorizadoResponse: {
+            FECompUltimoAutorizadoResult: {
+              CbteNro: 41,
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          FECAESolicitarResponse: {
+            FECAESolicitarResult: {
+              FeDetResp: {
+                FECAEDetResponse: [
+                  {
+                    Resultado: "A",
+                    CAE: "123456789",
+                    CAEFchVto: "20260501",
+                  },
+                ],
+              },
+            },
+          },
+        },
+      });
+
+    await createWsfeService(options).createNextVoucher({
+      data: createBaseVoucherInput({
+        currencyId: "USD",
+        exchangeRate: undefined,
+        sameCurrencyForeignCancellation: "S",
+      }),
+    });
+
+    const request = options.soap.execute.mock.calls[1]?.[0].body.FeCAEReq
+      .FeDetReq.FECAEDetRequest;
+
+    expect(request).toMatchObject({
+      MonId: "USD",
+      CanMisMonExt: "S",
+    });
+    expect(request).not.toHaveProperty("MonCotiz");
+  });
+
+  it("does not send CanMisMonExt for peso vouchers", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockResolvedValueOnce({
+        result: {
+          FECompUltimoAutorizadoResponse: {
+            FECompUltimoAutorizadoResult: {
+              CbteNro: 41,
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          FECAESolicitarResponse: {
+            FECAESolicitarResult: {
+              FeDetResp: {
+                FECAEDetResponse: [
+                  {
+                    Resultado: "A",
+                    CAE: "123456789",
+                    CAEFchVto: "20260501",
+                  },
+                ],
+              },
+            },
+          },
+        },
+      });
+
+    await createWsfeService(options).createNextVoucher({
+      data: createBaseVoucherInput({
+        sameCurrencyForeignCancellation: "S",
+      }),
+    });
+
+    const request = options.soap.execute.mock.calls[1]?.[0].body.FeCAEReq
+      .FeDetReq.FECAEDetRequest;
+
+    expect(request).toMatchObject({
+      MonId: "PES",
+      MonCotiz: 1,
+    });
+    expect(request).not.toHaveProperty("CanMisMonExt");
   });
 
   it("normalizes supported date inputs before sending the SOAP request", async () => {
