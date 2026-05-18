@@ -5,6 +5,7 @@ export type {
   WsfeAssociatedPeriod,
   WsfeAssociatedVoucher,
   WsfeAuthorizationResult,
+  WsfeAuthorizeVoucherInput,
   WsfeBuyer,
   WsfeCatalogEntry,
   WsfeCurrencyType,

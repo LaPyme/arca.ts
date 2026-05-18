@@ -4,6 +4,7 @@
   "packageManager": "pnpm@10.28.0",
   "scripts": {
     "build": "pnpm exec turbo build",
+    "changeset": "changeset",
     "typecheck": "pnpm exec turbo typecheck && pnpm typecheck:examples",
     "typecheck:examples": "pnpm exec tsc --project tsconfig.examples.json --noEmit",
     "test": "pnpm exec turbo test",
@@ -14,6 +15,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.10",
+    "@changesets/cli": "^2.29.8",
     "@types/node": "^25.0.8",
     "turbo": "^2.5.8",
     "typescript": "^5.9.3",

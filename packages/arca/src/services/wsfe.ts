@@ -57,7 +57,7 @@ export type WsfeActivity = {
   id: number;
 };
 
-/** Input data for creating a new WSFE voucher via {@link WsfeService.createNextVoucher}. */
+/** Input data for authorizing a WSFE voucher. */
 export type WsfeVoucherInput = {
   salesPoint: number;
   voucherType: number;
@@ -85,6 +85,13 @@ export type WsfeVoucherInput = {
   optionalFields?: WsfeOptionalField[];
   buyers?: WsfeBuyer[];
   activities?: WsfeActivity[];
+};
+
+/** Input for authorizing a WSFE voucher with an explicit voucher number. */
+export type WsfeAuthorizeVoucherInput = {
+  representedTaxId?: number | string;
+  data: WsfeVoucherInput;
+  voucherNumber: number;
 };
 
 /** Result of a successful WSFE voucher authorization. */
@@ -150,6 +157,10 @@ export type WsfeQuotation = {
 
 /** WSFE electronic invoicing service. */
 export type WsfeService = {
+  /** Authorizes a voucher with the explicit number sent as `CbteDesde` and `CbteHasta`. */
+  authorizeVoucher(
+    input: WsfeAuthorizeVoucherInput
+  ): Promise<WsfeAuthorizationResult>;
   /** Authorizes a new voucher by fetching the next number and requesting a CAE. */
   createNextVoucher(input: {
     representedTaxId?: number | string;
@@ -366,7 +377,77 @@ export function createWsfeService(
     return getWsfeResultEntries(result, resultKey).map(mapWsfeCatalogEntry);
   }
 
+  function authorizeVoucher({
+    representedTaxId,
+    data,
+    voucherNumber,
+  }: WsfeAuthorizeVoucherInput): Promise<WsfeAuthorizationResult> {
+    const normalizedInput = normalizeWsfeVoucherInput(data);
+    return authorizeNormalizedVoucher({
+      representedTaxId,
+      data: normalizedInput,
+      voucherNumber,
+    });
+  }
+
+  async function authorizeNormalizedVoucher({
+    representedTaxId,
+    data: normalizedInput,
+    voucherNumber,
+  }: {
+    representedTaxId?: number | string;
+    data: NormalizedWsfeVoucherInput;
+    voucherNumber: number;
+  }): Promise<WsfeAuthorizationResult> {
+    const requestData = mapWsfeVoucherInput(normalizedInput, voucherNumber);
+
+    const auth = await options.auth.login("wsfe", { representedTaxId });
+    const response = await options.soap.execute<
+      Record<string, unknown>,
+      Record<string, unknown>
+    >({
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      body: {
+        Auth: createWsfeAuth(
+          representedTaxId ?? options.config.taxId,
+          auth.token,
+          auth.sign
+        ),
+        FeCAEReq: {
+          FeCabReq: {
+            CantReg: 1,
+            PtoVta: normalizedInput.salesPoint,
+            CbteTipo: normalizedInput.voucherType,
+          },
+          FeDetReq: {
+            FECAEDetRequest: requestData,
+          },
+        },
+      },
+    });
+
+    const result = unwrapWsfeOperationResult("FECAESolicitar", response.result);
+    const detailResponse = normalizeWsfeDetailResponse(result);
+    const cae = detailResponse.CAE;
+    const caeExpiry = detailResponse.CAEFchVto;
+
+    if (typeof cae !== "string" || typeof caeExpiry !== "string") {
+      throw new ArcaServiceError("WSFE did not return CAE authorization data", {
+        detail: result,
+      });
+    }
+
+    return {
+      cae,
+      caeExpiry: String(caeExpiry),
+      voucherNumber,
+      raw: result,
+    };
+  }
+
   return {
+    authorizeVoucher,
     async createNextVoucher({ representedTaxId, data }) {
       const normalizedInput = normalizeWsfeVoucherInput(data);
 
@@ -376,55 +457,11 @@ export function createWsfeService(
         voucherType: normalizedInput.voucherType,
       });
 
-      const requestData = mapWsfeVoucherInput(normalizedInput, voucherNumber);
-
-      const auth = await options.auth.login("wsfe", { representedTaxId });
-      const response = await options.soap.execute<
-        Record<string, unknown>,
-        Record<string, unknown>
-      >({
-        service: "wsfe",
-        operation: "FECAESolicitar",
-        body: {
-          Auth: createWsfeAuth(
-            representedTaxId ?? options.config.taxId,
-            auth.token,
-            auth.sign
-          ),
-          FeCAEReq: {
-            FeCabReq: {
-              CantReg: 1,
-              PtoVta: normalizedInput.salesPoint,
-              CbteTipo: normalizedInput.voucherType,
-            },
-            FeDetReq: {
-              FECAEDetRequest: requestData,
-            },
-          },
-        },
-      });
-
-      const result = unwrapWsfeOperationResult(
-        "FECAESolicitar",
-        response.result
-      );
-      const detailResponse = normalizeWsfeDetailResponse(result);
-      const cae = detailResponse.CAE;
-      const caeExpiry = detailResponse.CAEFchVto;
-
-      if (typeof cae !== "string" || typeof caeExpiry !== "string") {
-        throw new ArcaServiceError(
-          "WSFE did not return CAE authorization data",
-          { detail: result }
-        );
-      }
-
-      return {
-        cae,
-        caeExpiry: String(caeExpiry),
+      return authorizeNormalizedVoucher({
+        representedTaxId,
+        data: normalizedInput,
         voucherNumber,
-        raw: result,
-      };
+      });
     },
     getNextVoucherNumber,
     getLastVoucher(input) {

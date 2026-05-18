@@ -63,6 +63,73 @@ function createWsfeOperationResult(
 }
 
 describe("createWsfeService", () => {
+  it("authorizes a voucher with an explicit WSFE number", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: {
+                Resultado: "A",
+                CAE: "123456789",
+                CAEFchVto: "20260501",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const service = createWsfeService(options);
+    const result = await service.authorizeVoucher({
+      representedTaxId: "20304050607",
+      data: createBaseVoucherInput(),
+      voucherNumber: 26_506,
+    });
+
+    expect(result).toEqual({
+      cae: "123456789",
+      caeExpiry: "20260501",
+      voucherNumber: 26_506,
+      raw: {
+        FeDetResp: {
+          FECAEDetResponse: {
+            Resultado: "A",
+            CAE: "123456789",
+            CAEFchVto: "20260501",
+          },
+        },
+      },
+    });
+    expect(options.auth.login).toHaveBeenCalledOnce();
+    expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
+      representedTaxId: "20304050607",
+    });
+    expect(options.soap.execute).toHaveBeenCalledOnce();
+    expect(options.soap.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        service: "wsfe",
+        operation: "FECAESolicitar",
+        body: expect.objectContaining({
+          FeCAEReq: expect.objectContaining({
+            FeCabReq: {
+              CantReg: 1,
+              PtoVta: 1,
+              CbteTipo: 6,
+            },
+            FeDetReq: {
+              FECAEDetRequest: expect.objectContaining({
+                CbteDesde: 26_506,
+                CbteHasta: 26_506,
+              }),
+            },
+          }),
+        }),
+      })
+    );
+  });
+
   it("creates the next voucher and wraps WSFE collection fields", async () => {
     const options = createBaseOptions();
     options.soap.execute
@@ -212,8 +279,9 @@ describe("createWsfeService", () => {
       }),
     });
 
-    const request = options.soap.execute.mock.calls[1]?.[0].body.FeCAEReq
-      .FeDetReq.FECAEDetRequest;
+    const request =
+      options.soap.execute.mock.calls[1]?.[0].body.FeCAEReq.FeDetReq
+        .FECAEDetRequest;
 
     expect(request).toMatchObject({
       MonId: "USD",
@@ -258,8 +326,9 @@ describe("createWsfeService", () => {
       }),
     });
 
-    const request = options.soap.execute.mock.calls[1]?.[0].body.FeCAEReq
-      .FeDetReq.FECAEDetRequest;
+    const request =
+      options.soap.execute.mock.calls[1]?.[0].body.FeCAEReq.FeDetReq
+        .FECAEDetRequest;
 
     expect(request).toMatchObject({
       MonId: "PES",
