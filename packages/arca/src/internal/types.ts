@@ -35,6 +35,19 @@ export type ArcaLoggerConfig = {
   log?: (level: ArcaLogLevel, message: string, ...args: unknown[]) => void;
 };
 
+export type ArcaWsaaSessionKey = {
+  environment: ArcaEnvironment;
+  service: ArcaWsaaServiceId;
+  certificateFingerprint: string;
+};
+
+export type ArcaWsaaSessionStore = {
+  get(key: ArcaWsaaSessionKey): Promise<ArcaAuthCredentials | null>;
+  set(key: ArcaWsaaSessionKey, credentials: ArcaAuthCredentials): Promise<void>;
+  delete?(key: ArcaWsaaSessionKey): Promise<void>;
+  withLock?<T>(key: ArcaWsaaSessionKey, fn: () => Promise<T>): Promise<T>;
+};
+
 /** Configuration required to create an ARCA client. */
 export type ArcaClientConfig = {
   taxId: string;
@@ -45,6 +58,7 @@ export type ArcaClientConfig = {
   retries?: number;
   retryDelay?: number;
   logger?: ArcaLoggerConfig;
+  wsaaSessionStore?: ArcaWsaaSessionStore;
 };
 
 /** Credentials returned by a WSAA login. */

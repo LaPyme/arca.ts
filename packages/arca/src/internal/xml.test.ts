@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { ArcaSoapFaultError } from "../errors";
+import type {
+  ArcaInvalidSoapResponseError,
+  ArcaSoapFaultError,
+} from "../errors";
 import {
   buildSoapEnvelope,
   getSingleBodyEntry,
@@ -84,9 +87,31 @@ describe("xml helpers", () => {
   });
 
   it("rejects malformed SOAP responses and multiple body entries", () => {
-    expect(() => parseSoapBody("<Envelope />")).toThrowError(
-      expect.objectContaining<Partial<ArcaSoapFaultError>>({
+    expect(() =>
+      parseSoapBody(
+        "<Envelope><Token>secret</Token><Sign>sig</Sign></Envelope>",
+        {
+          service: "wsfe",
+          operation: "FECompConsultar",
+          endpointUrl: "https://example.com/ws",
+          statusCode: 200,
+          contentType: "text/xml",
+          responseBody:
+            "<Envelope><Token>secret</Token><Sign>sig</Sign></Envelope>",
+        }
+      )
+    ).toThrowError(
+      expect.objectContaining<Partial<ArcaInvalidSoapResponseError>>({
+        name: "ArcaInvalidSoapResponseError",
         message: "Invalid SOAP response: missing body",
+        service: "wsfe",
+        operation: "FECompConsultar",
+        endpointUrl: "https://example.com/ws",
+        statusCode: 200,
+        contentType: "text/xml",
+        responseBodyLength: 58,
+        responseBodyPreview:
+          "<Envelope><Token>[REDACTED]</Token><Sign>[REDACTED]</Sign></Envelope>",
       })
     );
 
@@ -96,7 +121,8 @@ describe("xml helpers", () => {
         second: { ok: false },
       })
     ).toThrowError(
-      expect.objectContaining<Partial<ArcaSoapFaultError>>({
+      expect.objectContaining<Partial<ArcaInvalidSoapResponseError>>({
+        name: "ArcaInvalidSoapResponseError",
         message: "Invalid SOAP response: expected a single body entry, got 2",
       })
     );

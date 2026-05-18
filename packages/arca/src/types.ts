@@ -10,4 +10,6 @@ export type {
   ArcaServiceName,
   ArcaServiceTarget,
   ArcaWsaaServiceId,
+  ArcaWsaaSessionKey,
+  ArcaWsaaSessionStore,
 } from "./internal/types";

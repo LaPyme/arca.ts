@@ -13,6 +13,7 @@ export {
   ArcaConfigurationError,
   ArcaError,
   ArcaInputError,
+  ArcaInvalidSoapResponseError,
   ArcaServiceError,
   ArcaSoapFaultError,
   ArcaTransportError,
@@ -68,4 +69,7 @@ export type {
   ArcaServiceName,
   ArcaServiceTarget,
   ArcaWsaaServiceId,
+  ArcaWsaaSessionKey,
+  ArcaWsaaSessionStore,
 } from "./types";
+export { createMemoryWsaaSessionStore } from "./wsaa/session-store";

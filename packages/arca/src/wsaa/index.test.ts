@@ -1,10 +1,14 @@
 import forge from "node-forge";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  ArcaWsaaSessionKey,
+  ArcaWsaaSessionStore,
+} from "../internal/types";
 
 const mockPostXml = vi.hoisted(() => vi.fn());
 
 vi.mock("../internal/http", () => ({
-  postXml: mockPostXml,
+  postXmlWithMetadata: mockPostXml,
 }));
 
 function createWsaaConfig() {
@@ -64,6 +68,26 @@ function createWsaaSoapResponse(loginCmsReturnXml?: string) {
 </soap:Envelope>`;
 }
 
+function createSoapFaultResponse(faultCode: string, faultMessage: string) {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <soap:Fault>
+      <faultcode>${faultCode}</faultcode>
+      <faultstring>${faultMessage}</faultstring>
+    </soap:Fault>
+  </soap:Body>
+</soap:Envelope>`;
+}
+
+function createHttpResponse(body: string) {
+  return {
+    body,
+    statusCode: 200,
+    contentType: "text/xml; charset=utf-8",
+  };
+}
+
 async function loadWsaaModule() {
   const module = await import("./index");
   return module;
@@ -77,7 +101,7 @@ afterEach(() => {
 describe("createWsaaAuthModule", () => {
   it("requests and parses WSAA credentials", async () => {
     mockPostXml.mockResolvedValueOnce(
-      createWsaaSoapResponse(createLoginTicketResponseXml())
+      createHttpResponse(createWsaaSoapResponse(createLoginTicketResponseXml()))
     );
 
     const { createWsaaAuthModule } = await loadWsaaModule();
@@ -101,7 +125,9 @@ describe("createWsaaAuthModule", () => {
   });
 
   it("deduplicates in-flight requests and reuses cached credentials", async () => {
-    let resolveResponse: ((value: string) => void) | undefined;
+    let resolveResponse:
+      | ((value: ReturnType<typeof createHttpResponse>) => void)
+      | undefined;
     mockPostXml.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -119,7 +145,9 @@ describe("createWsaaAuthModule", () => {
       expect(mockPostXml).toHaveBeenCalledTimes(1);
     });
 
-    resolveResponse?.(createWsaaSoapResponse(createLoginTicketResponseXml()));
+    resolveResponse?.(
+      createHttpResponse(createWsaaSoapResponse(createLoginTicketResponseXml()))
+    );
 
     const [firstCredentials, secondCredentials] = await Promise.all([
       firstLogin,
@@ -135,15 +163,25 @@ describe("createWsaaAuthModule", () => {
     const config = createWsaaConfig();
     mockPostXml
       .mockResolvedValueOnce(
-        createWsaaSoapResponse(createLoginTicketResponseXml({ token: "first" }))
-      )
-      .mockResolvedValueOnce(
-        createWsaaSoapResponse(
-          createLoginTicketResponseXml({ token: "second" })
+        createHttpResponse(
+          createWsaaSoapResponse(
+            createLoginTicketResponseXml({ token: "first" })
+          )
         )
       )
       .mockResolvedValueOnce(
-        createWsaaSoapResponse(createLoginTicketResponseXml({ token: "third" }))
+        createHttpResponse(
+          createWsaaSoapResponse(
+            createLoginTicketResponseXml({ token: "second" })
+          )
+        )
+      )
+      .mockResolvedValueOnce(
+        createHttpResponse(
+          createWsaaSoapResponse(
+            createLoginTicketResponseXml({ token: "third" })
+          )
+        )
       );
 
     const { createWsaaAuthModule } = await loadWsaaModule();
@@ -174,7 +212,9 @@ describe("createWsaaAuthModule", () => {
     const config = createWsaaConfig();
     const { createWsaaAuthModule } = await loadWsaaModule();
 
-    mockPostXml.mockResolvedValueOnce(createWsaaSoapResponse());
+    mockPostXml.mockResolvedValueOnce(
+      createHttpResponse(createWsaaSoapResponse())
+    );
     await expect(
       createWsaaAuthModule({ config }).login("wsfe")
     ).rejects.toMatchObject({
@@ -183,8 +223,10 @@ describe("createWsaaAuthModule", () => {
     });
 
     mockPostXml.mockResolvedValueOnce(
-      createWsaaSoapResponse(
-        '<?xml version="1.0" encoding="UTF-8"?><loginTicketResponse><header /></loginTicketResponse>'
+      createHttpResponse(
+        createWsaaSoapResponse(
+          '<?xml version="1.0" encoding="UTF-8"?><loginTicketResponse><header /></loginTicketResponse>'
+        )
       )
     );
     await expect(
@@ -193,5 +235,220 @@ describe("createWsaaAuthModule", () => {
       name: "ArcaTransportError",
       message: "Invalid WSAA login ticket response structure",
     });
+  });
+
+  it("hydrates process memory from a durable store hit and avoids WSAA", async () => {
+    const credentials = {
+      token: "stored-token",
+      sign: "stored-sign",
+      expiresAt: "2099-01-01T00:00:00Z",
+    };
+    const store = {
+      get: vi.fn().mockResolvedValue(credentials),
+      set: vi.fn(),
+    };
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({
+      config: { ...createWsaaConfig(), wsaaSessionStore: store },
+    });
+
+    await expect(auth.login("wsfe")).resolves.toEqual(credentials);
+    await expect(auth.login("wsfe")).resolves.toEqual(credentials);
+    expect(mockPostXml).not.toHaveBeenCalled();
+    expect(store.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-checks the durable store inside the lock before calling WSAA", async () => {
+    const credentials = {
+      token: "locked-token",
+      sign: "locked-sign",
+      expiresAt: "2099-01-01T00:00:00Z",
+    };
+    const withLock = vi.fn(
+      async <T>(_key: ArcaWsaaSessionKey, fn: () => Promise<T>) => await fn()
+    );
+    const store = {
+      get: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(credentials),
+      set: vi.fn(),
+      withLock: withLock as ArcaWsaaSessionStore["withLock"],
+    };
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({
+      config: { ...createWsaaConfig(), wsaaSessionStore: store },
+    });
+
+    await expect(auth.login("wsfe")).resolves.toEqual(credentials);
+    expect(mockPostXml).not.toHaveBeenCalled();
+    expect(store.withLock).toHaveBeenCalledTimes(1);
+    expect(store.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers coe.alreadyAuthenticated from a durable store hit", async () => {
+    const credentials = {
+      token: "recovered-token",
+      sign: "recovered-sign",
+      expiresAt: "2099-01-01T00:00:00Z",
+    };
+    const store = {
+      get: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(credentials),
+      set: vi.fn(),
+    };
+    mockPostXml.mockResolvedValueOnce(
+      createHttpResponse(
+        createSoapFaultResponse(
+          "ns1:coe.alreadyAuthenticated",
+          "El CEE ya posee un TA valido"
+        )
+      )
+    );
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({
+      config: { ...createWsaaConfig(), wsaaSessionStore: store },
+    });
+
+    await expect(auth.login("wsfe")).resolves.toEqual(credentials);
+    expect(mockPostXml).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws an actionable error for coe.alreadyAuthenticated without a durable store", async () => {
+    mockPostXml.mockResolvedValueOnce(
+      createHttpResponse(
+        createSoapFaultResponse(
+          "ns1:coe.alreadyAuthenticated",
+          "El CEE ya posee un TA valido"
+        )
+      )
+    );
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({ config: createWsaaConfig() });
+
+    await expect(auth.login("wsfe")).rejects.toMatchObject({
+      name: "ArcaConfigurationError",
+      message: expect.stringContaining("durable wsaaSessionStore"),
+    });
+  });
+
+  it("ignores expired durable credentials and replaces them after WSAA succeeds", async () => {
+    const store = {
+      get: vi.fn().mockResolvedValue({
+        token: "expired",
+        sign: "expired",
+        expiresAt: "2000-01-01T00:00:00Z",
+      }),
+      set: vi.fn(),
+    };
+    mockPostXml.mockResolvedValueOnce(
+      createHttpResponse(
+        createWsaaSoapResponse(
+          createLoginTicketResponseXml({ token: "fresh-token" })
+        )
+      )
+    );
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({
+      config: { ...createWsaaConfig(), wsaaSessionStore: store },
+    });
+
+    await expect(auth.login("wsfe")).resolves.toMatchObject({
+      token: "fresh-token",
+    });
+    expect(store.set).toHaveBeenCalledWith(
+      expect.objectContaining({ service: "wsfe", environment: "test" }),
+      expect.objectContaining({ token: "fresh-token" })
+    );
+  });
+
+  it("surfaces store failures with useful context", async () => {
+    const store = {
+      get: vi.fn().mockRejectedValue(new Error("redis unavailable")),
+      set: vi.fn(),
+    };
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({
+      config: { ...createWsaaConfig(), wsaaSessionStore: store },
+    });
+
+    await expect(auth.login("wsfe")).rejects.toMatchObject({
+      name: "ArcaConfigurationError",
+      message: "WSAA session store get failed for service wsfe",
+    });
+  });
+
+  it("lets independently created clients share durable credentials", async () => {
+    mockPostXml.mockResolvedValueOnce(
+      createHttpResponse(
+        createWsaaSoapResponse(
+          createLoginTicketResponseXml({ token: "shared-token" })
+        )
+      )
+    );
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const { createMemoryWsaaSessionStore } = await import("./session-store");
+    const store = createMemoryWsaaSessionStore();
+    const config = { ...createWsaaConfig(), wsaaSessionStore: store };
+    const firstAuth = createWsaaAuthModule({ config });
+    const secondAuth = createWsaaAuthModule({ config });
+
+    await expect(firstAuth.login("wsfe")).resolves.toMatchObject({
+      token: "shared-token",
+    });
+    await expect(secondAuth.login("wsfe")).resolves.toMatchObject({
+      token: "shared-token",
+    });
+    expect(mockPostXml).toHaveBeenCalledTimes(1);
+  });
+
+  it("serializes cold starts through a shared store lock", async () => {
+    let resolveResponse:
+      | ((value: ReturnType<typeof createHttpResponse>) => void)
+      | undefined;
+    mockPostXml.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveResponse = resolve;
+        })
+    );
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const { createMemoryWsaaSessionStore } = await import("./session-store");
+    const store = createMemoryWsaaSessionStore();
+    const config = { ...createWsaaConfig(), wsaaSessionStore: store };
+    const firstAuth = createWsaaAuthModule({ config });
+    const secondAuth = createWsaaAuthModule({ config });
+
+    const firstLogin = firstAuth.login("wsfe");
+    const secondLogin = secondAuth.login("wsfe");
+
+    await vi.waitFor(() => {
+      expect(mockPostXml).toHaveBeenCalledTimes(1);
+    });
+
+    resolveResponse?.(
+      createHttpResponse(
+        createWsaaSoapResponse(
+          createLoginTicketResponseXml({ token: "locked-shared-token" })
+        )
+      )
+    );
+
+    await expect(Promise.all([firstLogin, secondLogin])).resolves.toEqual([
+      expect.objectContaining({ token: "locked-shared-token" }),
+      expect.objectContaining({ token: "locked-shared-token" }),
+    ]);
+    expect(mockPostXml).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,6 +3,7 @@ import {
   ArcaConfigurationError,
   ArcaError,
   ArcaInputError,
+  ArcaInvalidSoapResponseError,
   ArcaServiceError,
   ArcaSoapFaultError,
   ArcaTransportError,
@@ -21,8 +22,23 @@ describe("errors", () => {
     const transportError = new ArcaTransportError("transport", {
       cause,
       statusCode: 500,
+      contentType: "text/xml",
       responseBody: "<fault />",
     });
+    const invalidSoapResponse = new ArcaInvalidSoapResponseError(
+      "invalid soap",
+      {
+        cause,
+        service: "wsfe",
+        operation: "FECompConsultar",
+        endpointUrl: "https://example.com/ws",
+        statusCode: 200,
+        contentType: "text/html",
+        responseBodyLength: 42,
+        responseBodyPreview: "<html />",
+        parsedDetail: { html: true },
+      }
+    );
     const soapFault = new ArcaSoapFaultError("soap", {
       cause,
       faultCode: "soap:Server",
@@ -53,7 +69,20 @@ describe("errors", () => {
       name: "ArcaTransportError",
       code: "ARCA_TRANSPORT_ERROR",
       statusCode: 500,
+      contentType: "text/xml",
       responseBody: "<fault />",
+    });
+    expect(invalidSoapResponse).toMatchObject({
+      name: "ArcaInvalidSoapResponseError",
+      code: "ARCA_INVALID_SOAP_RESPONSE",
+      service: "wsfe",
+      operation: "FECompConsultar",
+      endpointUrl: "https://example.com/ws",
+      statusCode: 200,
+      contentType: "text/html",
+      responseBodyLength: 42,
+      responseBodyPreview: "<html />",
+      parsedDetail: { html: true },
     });
     expect(soapFault).toMatchObject({
       name: "ArcaSoapFaultError",

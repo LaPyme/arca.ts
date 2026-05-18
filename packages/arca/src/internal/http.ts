@@ -25,7 +25,18 @@ type PostXmlOptions = {
   operation?: string;
 };
 
-export async function postXml({
+export type PostXmlResponse = {
+  body: string;
+  statusCode?: number;
+  contentType?: string;
+};
+
+export async function postXml({ ...options }: PostXmlOptions): Promise<string> {
+  const response = await postXmlWithMetadata(options);
+  return response.body;
+}
+
+export async function postXmlWithMetadata({
   url,
   body,
   contentType,
@@ -37,7 +48,7 @@ export async function postXml({
   logger,
   service,
   operation,
-}: PostXmlOptions): Promise<string> {
+}: PostXmlOptions): Promise<PostXmlResponse> {
   const totalAttempts = retries + 1;
   for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
     try {
@@ -98,18 +109,18 @@ async function postXmlOnce({
     "url" | "body" | "contentType" | "useLegacyTlsSecurityLevel0" | "timeout"
   >
 > &
-  Pick<PostXmlOptions, "soapAction">): Promise<string> {
+  Pick<PostXmlOptions, "soapAction">): Promise<PostXmlResponse> {
   const endpoint = new URL(url);
   const requestBody = Buffer.from(body, "utf8");
 
   return await new Promise((resolve, reject) => {
     let settled = false;
-    const settleResolve = (responseBody: string) => {
+    const settleResolve = (response: PostXmlResponse) => {
       if (settled) {
         return;
       }
       settled = true;
-      resolve(responseBody);
+      resolve(response);
     };
     const settleReject = (error: ArcaTransportError) => {
       if (settled) {
@@ -177,7 +188,11 @@ async function postXmlOnce({
             : response.headers["content-type"];
 
           if (statusCode >= 200 && statusCode < 300) {
-            settleResolve(responseBody);
+            settleResolve({
+              body: responseBody,
+              statusCode,
+              contentType: responseContentType,
+            });
             return;
           }
 
@@ -185,7 +200,11 @@ async function postXmlOnce({
           // 500. Let higher layers parse those XML faults instead of forcing a
           // transport error here.
           if (isXmlLikeResponse(responseBody, responseContentType)) {
-            settleResolve(responseBody);
+            settleResolve({
+              body: responseBody,
+              statusCode,
+              contentType: responseContentType,
+            });
             return;
           }
 
@@ -194,6 +213,7 @@ async function postXmlOnce({
               `ARCA HTTP request failed with status ${statusCode}`,
               {
                 statusCode,
+                contentType: responseContentType,
                 responseBody,
               }
             )

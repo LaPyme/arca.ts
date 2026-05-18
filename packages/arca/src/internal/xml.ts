@@ -1,6 +1,6 @@
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
-import { ArcaSoapFaultError } from "../errors";
-import type { ArcaSoapVersion } from "../internal/types";
+import { ArcaInvalidSoapResponseError, ArcaSoapFaultError } from "../errors";
+import type { ArcaServiceName, ArcaSoapVersion } from "../internal/types";
 
 const xmlBuilder = new XMLBuilder({
   attributeNamePrefix: "@_",
@@ -18,6 +18,16 @@ const xmlParser = new XMLParser({
   removeNSPrefix: true,
   trimValues: true,
 });
+
+export type ArcaSoapParseContext = {
+  service?: ArcaServiceName;
+  operation?: string;
+  endpointUrl?: string;
+  statusCode?: number;
+  contentType?: string;
+  responseBody?: string;
+  responseBodyPreviewLength?: number;
+};
 
 export function buildSoapEnvelope(
   soapVersion: ArcaSoapVersion,
@@ -58,15 +68,31 @@ export function buildSoapEnvelope(
   return `<?xml version="1.0" encoding="utf-8"?>${xmlBuilder.build(payload)}`;
 }
 
-export function parseSoapBody(xml: string): Record<string, unknown> {
-  const parsed = xmlParser.parse(xml) as Record<string, unknown>;
+export function parseSoapBody(
+  xml: string,
+  context: ArcaSoapParseContext = {}
+): Record<string, unknown> {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = xmlParser.parse(xml) as Record<string, unknown>;
+  } catch (error) {
+    throw createInvalidSoapResponseError(
+      "Invalid SOAP response: XML parse failed",
+      context,
+      undefined,
+      error instanceof Error ? error : undefined
+    );
+  }
+
   const envelope = parsed.Envelope as Record<string, unknown> | undefined;
   const body = envelope?.Body as Record<string, unknown> | undefined;
 
   if (!body) {
-    throw new ArcaSoapFaultError("Invalid SOAP response: missing body", {
-      detail: parsed,
-    });
+    throw createInvalidSoapResponseError(
+      "Invalid SOAP response: missing body",
+      context,
+      parsed
+    );
   }
 
   const fault = body.Fault as Record<string, unknown> | undefined;
@@ -78,19 +104,56 @@ export function parseSoapBody(xml: string): Record<string, unknown> {
 }
 
 export function getSingleBodyEntry<T = unknown>(
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  context: ArcaSoapParseContext = {}
 ): [string, T] {
   const entries = Object.entries(body).filter(([key]) => key !== "@_xmlns");
   if (entries.length !== 1) {
-    throw new ArcaSoapFaultError(
+    throw createInvalidSoapResponseError(
       `Invalid SOAP response: expected a single body entry, got ${entries.length}`,
-      {
-        detail: body,
-      }
+      context,
+      body
     );
   }
 
   return entries[0] as [string, T];
+}
+
+function createInvalidSoapResponseError(
+  message: string,
+  context: ArcaSoapParseContext,
+  parsedDetail?: unknown,
+  cause?: Error
+): ArcaInvalidSoapResponseError {
+  const responseBody = context.responseBody ?? "";
+
+  return new ArcaInvalidSoapResponseError(message, {
+    cause,
+    service: context.service,
+    operation: context.operation,
+    endpointUrl: context.endpointUrl,
+    statusCode: context.statusCode,
+    contentType: context.contentType,
+    responseBodyLength: responseBody.length,
+    responseBodyPreview: sanitizeSoapResponsePreview(
+      responseBody,
+      context.responseBodyPreviewLength
+    ),
+    parsedDetail,
+  });
+}
+
+function sanitizeSoapResponsePreview(
+  responseBody: string,
+  maxLength = 4096
+): string {
+  return responseBody
+    .replace(
+      /<((?:[A-Za-z_][\w.-]*:)?(?:Token|Sign))\b([^>]*)>[\s\S]*?<\/\1>/gi,
+      (_match, tagName: string, attributes: string) =>
+        `<${tagName}${attributes}>[REDACTED]</${tagName}>`
+    )
+    .slice(0, maxLength);
 }
 
 export function parseXmlDocument<T = unknown>(xml: string): T {

@@ -8,7 +8,7 @@ Serious Node.js SDK for ARCA / AFIP web services, with a strong WSFE and Padrón
 
 - **ESM-only**, Node.js **>= 20**
 - **Direct ARCA integration** with no proxy or hosted dependency
-- **WSAA login handling** with in-memory ticket cache, in-flight deduplication, and recovery for `coe.alreadyAuthenticated`
+- **WSAA login handling** with in-memory ticket cache, optional durable session stores, in-flight deduplication, and recovery for `coe.alreadyAuthenticated`
 - **Strict TypeScript** public API with JS-style field names mapped to SOAP internally
 - **Common ARCA reference data** exported as constants so examples and app code do not need magic numbers
 - **Copy-pasteable examples** designed to be readable by humans and coding agents
@@ -172,6 +172,8 @@ const client = createArcaClient({
   retries: 2,
   retryDelay: 500,
   logger: { level: "debug" },
+  // Optional: share WSAA login tickets across workers.
+  // wsaaSessionStore,
 });
 ```
 
@@ -185,6 +187,62 @@ const client = createArcaClient({
 | `retries` | `0` | Extra attempts after transport failures only |
 | `retryDelay` | `500` | Delay between transport retries in milliseconds |
 | `logger` | — | Optional structured logger config |
+| `wsaaSessionStore` | — | Optional WSAA ticket store for multi-worker deployments |
+
+### WSAA session stores
+
+By default, WSAA login tickets are cached in the current process only. That keeps scripts and single-process apps zero-config:
+
+```ts
+const client = createArcaClient({
+  taxId: "20123456789",
+  certificatePem: process.env.ARCA_CERTIFICATE_PEM!,
+  privateKeyPem: process.env.ARCA_PRIVATE_KEY_PEM!,
+  environment: "production",
+});
+```
+
+Serverless functions, queue workers, and multi-process deployments should provide a durable `wsaaSessionStore` so a valid TA can be reused by every worker instead of each cold process calling WSAA independently.
+
+```ts
+import {
+  type ArcaAuthCredentials,
+  type ArcaWsaaSessionKey,
+  createArcaClient,
+} from "facturas";
+
+const wsaaSessionStore = {
+  async get(key: ArcaWsaaSessionKey): Promise<ArcaAuthCredentials | null> {
+    // Read from Postgres, Redis, or another shared store.
+    return null;
+  },
+  async set(
+    key: ArcaWsaaSessionKey,
+    credentials: ArcaAuthCredentials
+  ): Promise<void> {
+    // Persist token, sign, and expiresAt for the key.
+  },
+  async withLock<T>(
+    key: ArcaWsaaSessionKey,
+    fn: () => Promise<T>
+  ): Promise<T> {
+    // Optional but recommended: serialize cold-start refreshes.
+    return await fn();
+  },
+};
+
+const client = createArcaClient({
+  taxId: "20123456789",
+  certificatePem: process.env.ARCA_CERTIFICATE_PEM!,
+  privateKeyPem: process.env.ARCA_PRIVATE_KEY_PEM!,
+  environment: "production",
+  wsaaSessionStore,
+});
+```
+
+The store key is scoped by environment, WSAA service, and certificate fingerprint. Store reads are still checked with the SDK's expiration safety margin. A production store should share data across all workers, encrypt or rely on encrypted storage, enforce expiration on read, and implement locking with advisory locks, Redis locks, or equivalent.
+
+For tests and local coordination through one shared object, the package also exports `createMemoryWsaaSessionStore()`.
 
 ### Environment variables
 
@@ -299,7 +357,7 @@ Import error classes from `facturas` or `facturas/errors`.
 
 ## Troubleshooting
 
-- `coe.alreadyAuthenticated`: the SDK already deduplicates in-flight WSAA logins and reuses valid cached tickets. If you still hit this repeatedly, avoid forcing fresh auth unnecessarily and check whether another process is racing with the same certificate.
+- `coe.alreadyAuthenticated`: the SDK deduplicates in-flight WSAA logins and reuses valid cached tickets. In serverless, queue workers, or any multi-process deployment, configure a durable `wsaaSessionStore` so cold workers can reuse the TA obtained by another process. Memory-only caching cannot recover across processes.
 - `dh key too small`: WSFE production requests already use a legacy OpenSSL security level where needed. If you still see this, confirm you are not bypassing the SDK transport or terminating TLS in another layer.
 - Expired certificate: replace the PEM certificate with a renewed one that matches the same private key expectations, then redeploy or restart the process.
 - Unauthorized service: your certificate may be valid but not authorized for the target service or environment. Re-check WSASS / homologation setup for test and service relationships for production.
@@ -339,8 +397,9 @@ import { ArcaServiceError } from "facturas/errors";
 ## Security
 
 - Treat certificates and private keys as secrets.
-- WSAA tickets are cached in memory only.
-- This package does not write credentials to disk.
+- By default, WSAA tickets are cached in memory only.
+- This package does not write credentials to disk unless your application provides a custom `wsaaSessionStore` that does so.
+- Production `wsaaSessionStore` implementations should encrypt credentials at rest or use a backend that provides encryption at rest.
 
 ## Development
 

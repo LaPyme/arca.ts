@@ -132,11 +132,36 @@ export function assertArcaClientConfig(config: ArcaClientConfig): void {
     invalidFields.push("logger.log");
   }
 
+  invalidFields.push(...getInvalidWsaaSessionStoreFields(normalized));
+
   if (invalidFields.length > 0) {
     throw new ArcaConfigurationError(
       `Missing or invalid ARCA client config fields: ${invalidFields.join(", ")}`
     );
   }
+}
+
+function getInvalidWsaaSessionStoreFields(config: ArcaClientConfig): string[] {
+  const store = config.wsaaSessionStore;
+  if (store === undefined) {
+    return [];
+  }
+
+  const invalidFields: string[] = [];
+  if (typeof store.get !== "function") {
+    invalidFields.push("wsaaSessionStore.get");
+  }
+  if (typeof store.set !== "function") {
+    invalidFields.push("wsaaSessionStore.set");
+  }
+  if (store.delete !== undefined && typeof store.delete !== "function") {
+    invalidFields.push("wsaaSessionStore.delete");
+  }
+  if (store.withLock !== undefined && typeof store.withLock !== "function") {
+    invalidFields.push("wsaaSessionStore.withLock");
+  }
+
+  return invalidFields;
 }
 
 export type ArcaServiceConfig = {
@@ -242,6 +267,9 @@ export function normalizeArcaClientConfig(
               : { level: normalizedLoggerLevel }),
           },
         }),
+    ...(config.wsaaSessionStore === undefined
+      ? {}
+      : { wsaaSessionStore: config.wsaaSessionStore }),
   };
 }
 

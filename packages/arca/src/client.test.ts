@@ -33,7 +33,7 @@ vi.mock("./services/padron", () => ({
   createPadronService: mockCreatePadronService,
 }));
 vi.mock("./internal/http", () => ({
-  postXml: mockPostXml,
+  postXmlWithMetadata: mockPostXml,
 }));
 
 import { createArcaClient } from "./client";
@@ -154,9 +154,11 @@ describe("createArcaClient", () => {
     mockCreateWsfeService.mockImplementation(actualWsfe.createWsfeService);
     mockCreateWsmtxcaService.mockReturnValue({} as object);
     mockCreatePadronService.mockReturnValue({} as object);
-    mockPostXml.mockResolvedValueOnce(
-      '<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><FEParamGetPtosVentaResponse><FEParamGetPtosVentaResult><ResultGet><PtoVenta><Nro>3</Nro></PtoVenta></ResultGet></FEParamGetPtosVentaResult></FEParamGetPtosVentaResponse></soap12:Body></soap12:Envelope>'
-    );
+    mockPostXml.mockResolvedValueOnce({
+      body: '<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><FEParamGetPtosVentaResponse><FEParamGetPtosVentaResult><ResultGet><PtoVenta><Nro>3</Nro></PtoVenta></ResultGet></FEParamGetPtosVentaResult></FEParamGetPtosVentaResponse></soap12:Body></soap12:Envelope>',
+      statusCode: 200,
+      contentType: "application/soap+xml; charset=utf-8",
+    });
 
     const client = createArcaClient(config);
 

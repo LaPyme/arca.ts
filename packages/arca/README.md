@@ -29,6 +29,8 @@ The package exports:
 - `facturas/errors`
 - `facturas/types`
 
+`facturas` also exports `createMemoryWsaaSessionStore()` for tests/local single-process coordination and the small `ArcaWsaaSessionStore` interface for applications that need to share WSAA tickets across workers through their own durable store.
+
 ## WSFE associated periods
 
 `client.wsfe.createNextVoucher({ data })` supports `associatedPeriod` for credit/debit notes that use `PeriodoAsoc` instead of `CbtesAsoc`:

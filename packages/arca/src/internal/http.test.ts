@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import https from "node:https";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ArcaTransportError } from "../errors";
-import { postXml } from "./http";
+import { postXml, postXmlWithMetadata } from "./http";
 import { createArcaLogger } from "./logger";
 
 afterEach(() => {
@@ -43,6 +43,28 @@ describe("postXml", () => {
         }),
       })
     );
+  });
+
+  it("can return HTTP response metadata with XML bodies", async () => {
+    vi.spyOn(https, "request").mockImplementation(
+      createMockRequest({
+        statusCode: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+        responseBody: "<html />",
+      })
+    );
+
+    await expect(
+      postXmlWithMetadata({
+        url: "https://example.com/ws",
+        body: "<request />",
+        contentType: 'text/xml; charset="utf-8"',
+      })
+    ).resolves.toEqual({
+      body: "<html />",
+      statusCode: 200,
+      contentType: "text/html; charset=utf-8",
+    });
   });
 
   it("switches the HTTP agent when legacy TLS mode is enabled", async () => {

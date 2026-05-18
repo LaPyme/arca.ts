@@ -30,6 +30,25 @@ describe("config", () => {
     ).not.toThrow();
   });
 
+  it("preserves optional WSAA session store configuration", () => {
+    const wsaaSessionStore = {
+      get: async () => null,
+      set: async () => undefined,
+    };
+
+    expect(() =>
+      assertArcaClientConfig({
+        taxId: "20123456789",
+        certificatePem:
+          "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+        privateKeyPem:
+          "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----",
+        environment: "test",
+        wsaaSessionStore,
+      })
+    ).not.toThrow();
+  });
+
   it("rejects incomplete or invalid client config fields", () => {
     expect(() =>
       assertArcaClientConfig({

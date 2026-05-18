@@ -1,6 +1,6 @@
 import { getArcaServiceConfig } from "../config";
-import { ArcaSoapFaultError } from "../errors";
-import { postXml } from "../internal/http";
+import { ArcaInvalidSoapResponseError, ArcaSoapFaultError } from "../errors";
+import { postXmlWithMetadata } from "../internal/http";
 import type { ArcaLogger } from "../internal/logger";
 import type {
   ArcaClientConfig,
@@ -58,7 +58,7 @@ export function createSoapTransport(
       });
 
       try {
-        const responseXml = await postXml({
+        const response = await postXmlWithMetadata({
           url,
           body: xml,
           contentType,
@@ -81,14 +81,24 @@ export function createSoapTransport(
           durationMs: Date.now() - startedAt,
         });
 
-        const soapBody = parseSoapBody(responseXml);
-        const [, result] =
-          getSingleBodyEntry<Record<string, unknown>>(soapBody);
+        const parseContext = {
+          service: request.service,
+          operation: request.operation,
+          endpointUrl: url,
+          statusCode: response.statusCode,
+          contentType: response.contentType,
+          responseBody: response.body,
+        };
+        const soapBody = parseSoapBody(response.body, parseContext);
+        const [, result] = getSingleBodyEntry<Record<string, unknown>>(
+          soapBody,
+          parseContext
+        );
 
         return {
           service: request.service,
           operation: request.operation,
-          raw: responseXml,
+          raw: response.body,
           result: result as TResult,
         };
       } catch (error) {
@@ -98,6 +108,18 @@ export function createSoapTransport(
             operation: request.operation,
             url,
             faultCode: error.faultCode,
+            error,
+          });
+        }
+
+        if (error instanceof ArcaInvalidSoapResponseError) {
+          options.logger?.error("ARCA invalid SOAP response", {
+            service: request.service,
+            operation: request.operation,
+            url,
+            statusCode: error.statusCode,
+            contentType: error.contentType,
+            responseBodyLength: error.responseBodyLength,
             error,
           });
         }
