@@ -5,13 +5,13 @@
   "type": "module",
   "license": "Apache-2.0",
   "author": "Lapyme",
-  "homepage": "https://github.com/LaPyme/arca.ts#readme",
+  "homepage": "https://github.com/LaPyme/facturas#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LaPyme/arca.ts.git"
+    "url": "git+https://github.com/LaPyme/facturas.git"
   },
   "bugs": {
-    "url": "https://github.com/LaPyme/arca.ts/issues"
+    "url": "https://github.com/LaPyme/facturas/issues"
   },
   "keywords": [
     "arca",
