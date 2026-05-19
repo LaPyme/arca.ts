@@ -183,6 +183,76 @@ describe("createWsmtxcaService", () => {
     });
   });
 
+  it("passes forceRefresh through every authenticated WSMTXCA method", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockResolvedValueOnce({
+        result: {
+          autorizarComprobanteResponse: {
+            resultado: "O",
+            comprobanteResponse: {
+              CAE: "12345678901234",
+              numeroComprobante: "11",
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          consultarUltimoComprobanteAutorizadoResponse: {
+            numeroComprobante: "11",
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          consultarComprobanteResponse: {
+            comprobanteResponse: {
+              fechaEmision: "20260301",
+            },
+          },
+        },
+      });
+
+    const service = createWsmtxcaService(options);
+
+    await service.authorizeVoucher({
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+      data: {
+        comprobanteCAERequest: {
+          numeroComprobante: 11,
+        },
+      },
+    });
+    await service.getLastAuthorizedVoucher({
+      representedTaxId: "20304050607",
+      voucherType: 6,
+      salesPoint: 8,
+      forceRefresh: true,
+    });
+    await service.getVoucher({
+      representedTaxId: "20304050607",
+      voucherType: 6,
+      salesPoint: 8,
+      voucherNumber: 11,
+      forceRefresh: true,
+    });
+
+    expect(options.auth.login).toHaveBeenNthCalledWith(1, "wsmtxca", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+    });
+    expect(options.auth.login).toHaveBeenNthCalledWith(2, "wsmtxca", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+    });
+    expect(options.auth.login).toHaveBeenNthCalledWith(3, "wsmtxca", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
+    });
+  });
+
   it("raises service errors for rejected authorizations", async () => {
     const options = createBaseOptions();
     options.soap.execute.mockResolvedValueOnce({

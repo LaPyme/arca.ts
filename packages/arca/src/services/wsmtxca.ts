@@ -32,12 +32,14 @@ export type WsmtxcaService = {
   authorizeVoucher(input: {
     representedTaxId?: ArcaRepresentedTaxId;
     data: Record<string, unknown>;
+    forceRefresh?: boolean;
   }): Promise<WsmtxcaAuthorizationResult>;
   /** Returns the last authorized voucher number for the given sales point and type. */
   getLastAuthorizedVoucher(input: {
     representedTaxId?: ArcaRepresentedTaxId;
     voucherType: number;
     salesPoint: number;
+    forceRefresh?: boolean;
   }): Promise<WsmtxcaLastAuthorizedVoucherResult>;
   /** Retrieves details for a specific voucher. */
   getVoucher(input: {
@@ -45,6 +47,7 @@ export type WsmtxcaService = {
     voucherType: number;
     salesPoint: number;
     voucherNumber: number;
+    forceRefresh?: boolean;
   }): Promise<WsmtxcaVoucherLookupResult>;
 };
 
@@ -59,8 +62,11 @@ export function createWsmtxcaService(
   options: CreateWsmtxcaServiceOptions
 ): WsmtxcaService {
   return {
-    async authorizeVoucher({ representedTaxId, data }) {
-      const auth = await options.auth.login("wsmtxca", { representedTaxId });
+    async authorizeVoucher({ representedTaxId, data, forceRefresh }) {
+      const auth = await options.auth.login("wsmtxca", {
+        representedTaxId,
+        forceRefresh,
+      });
       const response = await options.soap.execute<
         Record<string, unknown>,
         Record<string, unknown>
@@ -119,8 +125,12 @@ export function createWsmtxcaService(
       representedTaxId,
       voucherType,
       salesPoint,
+      forceRefresh,
     }) {
-      const auth = await options.auth.login("wsmtxca", { representedTaxId });
+      const auth = await options.auth.login("wsmtxca", {
+        representedTaxId,
+        forceRefresh,
+      });
       const response = await options.soap.execute<
         Record<string, unknown>,
         Record<string, unknown>
@@ -161,8 +171,12 @@ export function createWsmtxcaService(
       voucherType,
       salesPoint,
       voucherNumber,
+      forceRefresh,
     }) {
-      const auth = await options.auth.login("wsmtxca", { representedTaxId });
+      const auth = await options.auth.login("wsmtxca", {
+        representedTaxId,
+        forceRefresh,
+      });
       const response = await options.soap.execute<
         Record<string, unknown>,
         Record<string, unknown>

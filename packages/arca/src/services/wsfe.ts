@@ -92,6 +92,7 @@ export type WsfeAuthorizeVoucherInput = {
   representedTaxId?: number | string;
   data: WsfeVoucherInput;
   voucherNumber: number;
+  forceRefresh?: boolean;
 };
 
 /** Result of a successful WSFE voucher authorization. */
@@ -165,13 +166,14 @@ export type WsfeService = {
   createNextVoucher(input: {
     representedTaxId?: number | string;
     data: WsfeVoucherInput;
+    forceRefresh?: boolean;
   }): Promise<WsfeAuthorizationResult>;
   /** Returns the next available voucher number for the given sales point and type. */
   getNextVoucherNumber(input: {
     representedTaxId?: number | string;
     salesPoint: number;
     voucherType: number;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<number>;
   /**
    * @deprecated Use `getNextVoucherNumber()` instead.
@@ -181,58 +183,58 @@ export type WsfeService = {
     representedTaxId?: number | string;
     salesPoint: number;
     voucherType: number;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<number>;
   /** Lists all configured points of sale for the taxpayer. */
   getSalesPoints(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeSalesPoint[]>;
   /** Lists voucher types accepted by WSFE. */
   getVoucherTypes(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
   /** Lists document types accepted by WSFE. */
   getDocumentTypes(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
   /** Lists concept types accepted by WSFE. */
   getConceptTypes(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
   /** Lists supported currency types. */
   getCurrencyTypes(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeCurrencyType[]>;
   /** Lists VAT rates accepted by WSFE. */
   getVatRates(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
   /** Lists tax types accepted by WSFE. */
   getTaxTypes(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
   /** Lists optional field types accepted by WSFE. */
   getOptionalTypes(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
   /** Lists activities enabled for the taxpayer. */
   getActivities(input: {
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeActivityType[]>;
   /** Lists receiver VAT condition values accepted by WSFE. */
   getReceiverVatConditions(input: {
     representedTaxId?: number | string;
     voucherClass?: string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeReceiverVatCondition[]>;
   /** Reports WSFE backend status without requiring taxpayer authorization. */
   getServerStatus(): Promise<WsfeServerStatus>;
@@ -240,7 +242,7 @@ export type WsfeService = {
   getQuotation(input: {
     currencyId: string;
     representedTaxId?: number | string;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }): Promise<WsfeQuotation>;
   /** Retrieves details for a specific voucher. Returns `null` if not found. */
   getVoucherInfo(input: {
@@ -248,6 +250,7 @@ export type WsfeService = {
     number: number;
     salesPoint: number;
     voucherType: number;
+    forceRefresh?: boolean;
   }): Promise<WsfeVoucherInfo | null>;
 };
 
@@ -294,13 +297,13 @@ export function createWsfeService(
     operation: string,
     input: {
       representedTaxId?: ArcaRepresentedTaxId;
-      forceAuthRefresh?: boolean;
+      forceRefresh?: boolean;
     },
     body: Record<string, unknown> = {}
   ) {
     const auth = await options.auth.login("wsfe", {
       representedTaxId: input.representedTaxId,
-      forceRefresh: input.forceAuthRefresh,
+      forceRefresh: input.forceRefresh,
     });
     const response = await options.soap.execute<
       Record<string, unknown>,
@@ -341,18 +344,18 @@ export function createWsfeService(
     representedTaxId,
     salesPoint,
     voucherType,
-    forceAuthRefresh,
+    forceRefresh,
   }: {
     representedTaxId?: number | string;
     salesPoint: number;
     voucherType: number;
-    forceAuthRefresh?: boolean;
+    forceRefresh?: boolean;
   }) {
     const result = await executeWsfeAuthenticatedOperation(
       "FECompUltimoAutorizado",
       {
         representedTaxId,
-        forceAuthRefresh,
+        forceRefresh,
       },
       {
         PtoVta: salesPoint,
@@ -367,12 +370,12 @@ export function createWsfeService(
     resultKey: string,
     input: {
       representedTaxId?: ArcaRepresentedTaxId;
-      forceAuthRefresh?: boolean;
+      forceRefresh?: boolean;
     }
   ): Promise<WsfeCatalogEntry[]> {
     const result = await executeWsfeAuthenticatedOperation(operation, {
       representedTaxId: input.representedTaxId,
-      forceAuthRefresh: input.forceAuthRefresh,
+      forceRefresh: input.forceRefresh,
     });
     return getWsfeResultEntries(result, resultKey).map(mapWsfeCatalogEntry);
   }
@@ -381,12 +384,14 @@ export function createWsfeService(
     representedTaxId,
     data,
     voucherNumber,
+    forceRefresh,
   }: WsfeAuthorizeVoucherInput): Promise<WsfeAuthorizationResult> {
     const normalizedInput = normalizeWsfeVoucherInput(data);
     return authorizeNormalizedVoucher({
       representedTaxId,
       data: normalizedInput,
       voucherNumber,
+      forceRefresh,
     });
   }
 
@@ -394,14 +399,19 @@ export function createWsfeService(
     representedTaxId,
     data: normalizedInput,
     voucherNumber,
+    forceRefresh,
   }: {
     representedTaxId?: number | string;
     data: NormalizedWsfeVoucherInput;
     voucherNumber: number;
+    forceRefresh?: boolean;
   }): Promise<WsfeAuthorizationResult> {
     const requestData = mapWsfeVoucherInput(normalizedInput, voucherNumber);
 
-    const auth = await options.auth.login("wsfe", { representedTaxId });
+    const auth = await options.auth.login("wsfe", {
+      representedTaxId,
+      forceRefresh,
+    });
     const response = await options.soap.execute<
       Record<string, unknown>,
       Record<string, unknown>
@@ -448,13 +458,14 @@ export function createWsfeService(
 
   return {
     authorizeVoucher,
-    async createNextVoucher({ representedTaxId, data }) {
+    async createNextVoucher({ representedTaxId, data, forceRefresh }) {
       const normalizedInput = normalizeWsfeVoucherInput(data);
 
       const voucherNumber = await getNextVoucherNumber({
         representedTaxId,
         salesPoint: normalizedInput.salesPoint,
         voucherType: normalizedInput.voucherType,
+        forceRefresh,
       });
 
       return authorizeNormalizedVoucher({
@@ -467,12 +478,12 @@ export function createWsfeService(
     getLastVoucher(input) {
       return getNextVoucherNumber(input);
     },
-    async getSalesPoints({ representedTaxId, forceAuthRefresh }) {
+    async getSalesPoints({ representedTaxId, forceRefresh }) {
       const result = await executeWsfeAuthenticatedOperation(
         "FEParamGetPtosVenta",
         {
           representedTaxId,
-          forceAuthRefresh,
+          forceRefresh,
         }
       );
       const rawPoints = (
@@ -493,12 +504,12 @@ export function createWsfeService(
     getConceptTypes(input) {
       return getWsfeCatalog("FEParamGetTiposConcepto", "ConceptoTipo", input);
     },
-    async getCurrencyTypes({ representedTaxId, forceAuthRefresh }) {
+    async getCurrencyTypes({ representedTaxId, forceRefresh }) {
       const result = await executeWsfeAuthenticatedOperation(
         "FEParamGetTiposMonedas",
         {
           representedTaxId,
-          forceAuthRefresh,
+          forceRefresh,
         }
       );
       return getWsfeResultEntries(result, "Moneda").map(mapWsfeCurrencyType);
@@ -512,12 +523,12 @@ export function createWsfeService(
     getOptionalTypes(input) {
       return getWsfeCatalog("FEParamGetTiposOpcional", "OpcionalTipo", input);
     },
-    async getActivities({ representedTaxId, forceAuthRefresh }) {
+    async getActivities({ representedTaxId, forceRefresh }) {
       const result = await executeWsfeAuthenticatedOperation(
         "FEParamGetActividades",
         {
           representedTaxId,
-          forceAuthRefresh,
+          forceRefresh,
         }
       );
       return getWsfeResultEntries(result, "ActividadesTipo").map(
@@ -527,13 +538,13 @@ export function createWsfeService(
     async getReceiverVatConditions({
       representedTaxId,
       voucherClass,
-      forceAuthRefresh,
+      forceRefresh,
     }) {
       const result = await executeWsfeAuthenticatedOperation(
         "FEParamGetCondicionIvaReceptor",
         {
           representedTaxId,
-          forceAuthRefresh,
+          forceRefresh,
         },
         {
           ...(voucherClass === undefined ? {} : { ClaseCmp: voucherClass }),
@@ -547,12 +558,12 @@ export function createWsfeService(
       const result = await executeWsfeOperation("FEDummy");
       return mapWsfeServerStatus(result);
     },
-    async getQuotation({ currencyId, representedTaxId, forceAuthRefresh }) {
+    async getQuotation({ currencyId, representedTaxId, forceRefresh }) {
       const result = await executeWsfeAuthenticatedOperation(
         "FEParamGetCotizacion",
         {
           representedTaxId,
-          forceAuthRefresh,
+          forceRefresh,
         },
         {
           MonId: currencyId,
@@ -567,11 +578,13 @@ export function createWsfeService(
       number,
       salesPoint,
       voucherType,
+      forceRefresh,
     }) {
       const result = await executeWsfeAuthenticatedOperation(
         "FECompConsultar",
         {
           representedTaxId,
+          forceRefresh,
         },
         {
           FeCompConsReq: {

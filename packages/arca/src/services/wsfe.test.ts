@@ -163,6 +163,7 @@ describe("createWsfeService", () => {
     const service = createWsfeService(options);
     const result = await service.createNextVoucher({
       representedTaxId: "20304050607",
+      forceRefresh: true,
       data: createBaseVoucherInput({
         currencyId: "USD",
         associatedVouchers: [{ type: 1, salesPoint: 1, number: 1 }],
@@ -192,7 +193,7 @@ describe("createWsfeService", () => {
     });
     expect(options.auth.login).toHaveBeenNthCalledWith(1, "wsfe", {
       representedTaxId: "20304050607",
-      forceRefresh: undefined,
+      forceRefresh: true,
     });
     expect(options.auth.login).toHaveBeenNthCalledWith(2, "wsfe", {
       representedTaxId: "20304050607",
@@ -700,7 +701,7 @@ describe("createWsfeService", () => {
     await expect(
       service.getSalesPoints({
         representedTaxId: "20304050607",
-        forceAuthRefresh: true,
+        forceRefresh: true,
       })
     ).resolves.toEqual([{ number: 1 }, { number: 2 }]);
 
@@ -738,6 +739,7 @@ describe("createWsfeService", () => {
         number: 77,
         salesPoint: 1,
         voucherType: 6,
+        forceRefresh: true,
       })
     ).resolves.toEqual({
       voucherNumber: 77,
@@ -747,6 +749,10 @@ describe("createWsfeService", () => {
         CbteHasta: 77,
         Resultado: "A",
       },
+    });
+    expect(options.auth.login).toHaveBeenLastCalledWith("wsfe", {
+      representedTaxId: "20304050607",
+      forceRefresh: true,
     });
   });
 
@@ -818,13 +824,13 @@ describe("createWsfeService", () => {
     const service = createWsfeService(options);
     const execute = service[method as keyof typeof service] as (input: {
       representedTaxId?: number | string;
-      forceAuthRefresh?: boolean;
+      forceRefresh?: boolean;
     }) => Promise<unknown>;
 
     await expect(
       execute({
         representedTaxId: "20304050607",
-        forceAuthRefresh: true,
+        forceRefresh: true,
       })
     ).resolves.toEqual(expected);
     expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
@@ -864,7 +870,7 @@ describe("createWsfeService", () => {
     await expect(
       service.getCurrencyTypes({
         representedTaxId: "20304050607",
-        forceAuthRefresh: true,
+        forceRefresh: true,
       })
     ).resolves.toEqual([
       {
@@ -910,7 +916,7 @@ describe("createWsfeService", () => {
     await expect(
       service.getActivities({
         representedTaxId: "20304050607",
-        forceAuthRefresh: true,
+        forceRefresh: true,
       })
     ).resolves.toEqual([
       {
@@ -956,7 +962,7 @@ describe("createWsfeService", () => {
       service.getReceiverVatConditions({
         representedTaxId: "20304050607",
         voucherClass: "A",
-        forceAuthRefresh: true,
+        forceRefresh: true,
       })
     ).resolves.toEqual([
       {
@@ -1026,7 +1032,7 @@ describe("createWsfeService", () => {
       service.getQuotation({
         currencyId: "USD",
         representedTaxId: "20304050607",
-        forceAuthRefresh: true,
+        forceRefresh: true,
       })
     ).resolves.toEqual({
       currencyId: "USD",

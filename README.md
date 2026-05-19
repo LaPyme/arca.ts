@@ -304,6 +304,7 @@ WSFE electronic invoicing. Inputs use JS-style names and the SDK maps them to AF
 - `createNextVoucher({ data })` resolves the next number and requests CAE in one call.
 - `getVoucherInfo({ number, salesPoint, voucherType })` returns voucher details or `null`.
 - Catalog methods are available for live reference data when you do not want to hardcode values.
+- Authenticated methods accept `forceRefresh: true` to discard the cached WSAA TA and request a fresh Token Authorization for the same service.
 
 ### `client.padron`
 
@@ -317,6 +318,7 @@ Padron "not found" handling currently depends on SOAP fault message text from AR
 - `authorizeVoucher({ data })`
 - `getLastAuthorizedVoucher({ voucherType, salesPoint })`
 - `getVoucher({ voucherType, salesPoint, voucherNumber })`
+- Authenticated methods accept `forceRefresh: true` to renew the WSMTXCA WSAA TA before the call.
 
 The runtime support is stable and public. It is simply not the main documentation path in this SDK-focused pass.
 
