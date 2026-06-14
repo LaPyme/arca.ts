@@ -2,7 +2,6 @@
 import fs from "node:fs";
 import https from "node:https";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -22,10 +21,12 @@ const voucherNumber =
 
 installWsfeRawResponseProbe();
 
-const { createArcaClient } = await import("../dist/index.js");
+const { createArcaClient } = await import("../dist/index.mjs");
 
 const client = createArcaClient({
-  taxId: readEnv(environment === "production" ? "ARCA_CUIT_PROD" : "ARCA_CUIT_TEST"),
+  taxId: readEnv(
+    environment === "production" ? "ARCA_CUIT_PROD" : "ARCA_CUIT_TEST"
+  ),
   certificatePem: readPemEnv(
     environment === "production" ? "ARCA_CERT_PROD" : "ARCA_CERT_TEST"
   ),

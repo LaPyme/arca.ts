@@ -12,6 +12,9 @@ export default defineConfig({
   },
   target: "node20",
   format: ["esm"],
+  outExtension() {
+    return { js: ".mjs" };
+  },
   dts: true,
   sourcemap: true,
   clean: true,

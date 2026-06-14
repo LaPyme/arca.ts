@@ -16,8 +16,8 @@ npm install facturas
 
 For the full quick start, troubleshooting, and examples, see the repository docs:
 
-- [Repository README](https://github.com/LaPyme/arca.ts#readme)
-- [Examples directory](https://github.com/LaPyme/arca.ts/tree/main/examples)
+- [Repository README](https://github.com/LaPyme/facturas#readme)
+- [Examples directory](https://github.com/LaPyme/facturas/tree/main/examples)
 
 The package exports:
 

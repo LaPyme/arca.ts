@@ -1,8 +1,8 @@
-# arca.ts
+# facturas
 
 [![npm version](https://img.shields.io/npm/v/facturas.svg)](https://www.npmjs.com/package/facturas)
-[![CI](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml/badge.svg)](https://github.com/LaPyme/arca.ts/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://github.com/LaPyme/arca.ts/blob/main/LICENSE)
+[![CI](https://github.com/LaPyme/facturas/actions/workflows/ci.yml/badge.svg)](https://github.com/LaPyme/facturas/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://github.com/LaPyme/facturas/blob/main/LICENSE)
 
 Serious Node.js SDK for ARCA / AFIP web services, with a strong WSFE and Padrón experience today and WSMTXCA support preserved. It talks to ARCA endpoints directly, keeps the public API strict and predictable, and avoids pushing SOAP naming into your application code.
 
