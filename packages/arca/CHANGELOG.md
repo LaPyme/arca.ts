@@ -1,5 +1,12 @@
 # facturas
 
+## 0.5.2
+
+### Patch Changes
+
+- d4af327: Upgrade fast-xml-parser to the patched v5 line and refresh repository links before public announcement.
+- d4af327: Publish ESM-only package entrypoints with explicit `.mjs` runtime files and default export conditions.
+
 ## 0.5.1
 
 ### Patch Changes
