@@ -33,6 +33,8 @@ The package exports:
 
 Authenticated WSFE and WSMTXCA methods accept `forceRefresh: true` when callers need to discard the cached WSAA TA and request a fresh Token Authorization for the same service.
 
+For durable fiscal workflows, `authorizeVoucherOutcome(...)` returns typed `authorized`, `rejected`, or `indeterminate` evidence and performs one authorization transport attempt. `lookupVoucher(...)` provides operation-scoped `found` or `not_found` recovery evidence. The existing `authorizeVoucher(...)`, `getVoucherInfo(...)`, and `getVoucher(...)` methods remain compatibility wrappers.
+
 ## WSFE associated periods
 
 `client.wsfe.createNextVoucher({ data })` supports `associatedPeriod` for credit/debit notes that use `PeriodoAsoc` instead of `CbtesAsoc`:

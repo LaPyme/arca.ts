@@ -19,6 +19,15 @@ export {
   ArcaTransportError,
 } from "./errors";
 export type {
+  ArcaAuthorizationIndeterminateReason,
+  ArcaAuthorizationOutcome,
+  ArcaFiscalIssue,
+  ArcaFiscalResultLevel,
+  ArcaFiscalResults,
+  ArcaFiscalService,
+  ArcaVoucherLookupResult,
+} from "./services/fiscal-evidence";
+export type {
   CreatePadronServiceOptions,
   PadronService,
   PadronTaxIdLookupResult,
@@ -31,6 +40,7 @@ export type {
   WsfeActivityType,
   WsfeAssociatedPeriod,
   WsfeAssociatedVoucher,
+  WsfeAuthorizationOutcome,
   WsfeAuthorizationResult,
   WsfeAuthorizeVoucherInput,
   WsfeBuyer,
@@ -47,13 +57,20 @@ export type {
   WsfeVatRate,
   WsfeVoucherInfo,
   WsfeVoucherInput,
+  WsfeVoucherLookupResult,
 } from "./services/wsfe";
 export { createWsfeService } from "./services/wsfe";
 export type {
   CreateWsmtxcaServiceOptions,
+  WsmtxcaAuthorizationOutcome,
   WsmtxcaAuthorizationResult,
+  WsmtxcaAuthorizeVoucherInput,
   WsmtxcaLastAuthorizedVoucherResult,
+  WsmtxcaSalesPoint,
+  WsmtxcaSalesPointsResult,
   WsmtxcaService,
+  WsmtxcaVoucherInfo,
+  WsmtxcaVoucherLookupOutcome,
   WsmtxcaVoucherLookupResult,
 } from "./services/wsmtxca";
 export { createWsmtxcaService } from "./services/wsmtxca";

@@ -4,6 +4,7 @@ export type {
   WsfeActivityType,
   WsfeAssociatedPeriod,
   WsfeAssociatedVoucher,
+  WsfeAuthorizationOutcome,
   WsfeAuthorizationResult,
   WsfeAuthorizeVoucherInput,
   WsfeBuyer,
@@ -20,6 +21,7 @@ export type {
   WsfeVatRate,
   WsfeVoucherInfo,
   WsfeVoucherInput,
+  WsfeVoucherLookupResult,
 } from "./services/wsfe";
 // biome-ignore lint/performance/noBarrelFile: package subpath re-exports runtime WSFE factory
 export { createWsfeService } from "./services/wsfe";

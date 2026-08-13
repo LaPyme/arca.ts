@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ArcaTransportError } from "../errors";
 import { createWsmtxcaService } from "./wsmtxca";
 
 function createBaseOptions() {
@@ -73,6 +74,7 @@ describe("createWsmtxcaService", () => {
     expect(options.soap.execute).toHaveBeenCalledWith({
       service: "wsmtxca",
       operation: "autorizarComprobante",
+      retries: 0,
       bodyElementName: "autorizarComprobanteRequest",
       bodyElementNamespaceMode: "prefix",
       body: {
@@ -86,6 +88,142 @@ describe("createWsmtxcaService", () => {
         },
       },
     });
+  });
+
+  it.each([
+    "A",
+    "O",
+  ])("returns structured authorized evidence for WSMTXCA result %s", async (resultado) => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        autorizarComprobanteResponse: {
+          resultado,
+          comprobanteResponse: {
+            CAE: "12345678901234",
+            fechaVencimientoCAE: "20260301",
+            numeroComprobante: "11",
+          },
+          arrayObservaciones: {
+            codigoDescripcion: [
+              { codigo: 504, descripcion: "Observación uno" },
+              { codigo: 505, descripcion: "Observación dos" },
+            ],
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(options).authorizeVoucherOutcome({
+        data: {
+          comprobanteCAERequest: { numeroComprobante: 11 },
+        },
+      })
+    ).resolves.toMatchObject({
+      kind: "authorized",
+      result: resultado,
+      resultLevel: "operation",
+      results: { operation: resultado },
+      cae: "12345678901234",
+      voucherNumber: 11,
+      observations: [
+        { code: "504", message: "Observación uno" },
+        { code: "505", message: "Observación dos" },
+      ],
+    });
+  });
+
+  it("treats WSMTXCA authorization 500/501/502 as business rejection evidence", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        autorizarComprobanteResponse: {
+          resultado: "R",
+          arrayErrores: {
+            codigoDescripcion: [
+              { codigo: 500, descripcion: "Unidad inválida" },
+              { codigo: 501, descripcion: "Cantidad inválida" },
+              { codigo: 502, descripcion: "Precio inválido" },
+            ],
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(options).authorizeVoucherOutcome({
+        data: {
+          comprobanteCAERequest: { numeroComprobante: 11 },
+        },
+      })
+    ).resolves.toMatchObject({
+      kind: "rejected",
+      service: "wsmtxca",
+      operation: "autorizarComprobante",
+      result: "R",
+      errors: [
+        { code: "500", category: "business" },
+        { code: "501", category: "business" },
+        { code: "502", category: "business" },
+      ],
+    });
+  });
+
+  it("retains contradictory WSMTXCA result and CAE evidence", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        autorizarComprobanteResponse: {
+          resultado: "R",
+          comprobanteResponse: {
+            CAE: "12345678901234",
+            numeroComprobante: 11,
+          },
+          arrayErrores: {
+            codigoDescripcion: {
+              codigo: 500,
+              descripcion: "Unidad inválida",
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(options).authorizeVoucherOutcome({
+        data: {
+          comprobanteCAERequest: { numeroComprobante: 11 },
+        },
+      })
+    ).resolves.toMatchObject({
+      kind: "indeterminate",
+      reason: "contradictory_response",
+      results: { operation: "R" },
+      cae: "12345678901234",
+      voucherNumber: 11,
+    });
+  });
+
+  it("returns WSMTXCA transport failures as indeterminate without resubmitting", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockRejectedValueOnce(
+      new ArcaTransportError("connection lost")
+    );
+
+    await expect(
+      createWsmtxcaService(options).authorizeVoucherOutcome({
+        data: {
+          comprobanteCAERequest: { numeroComprobante: 11 },
+        },
+      })
+    ).resolves.toMatchObject({
+      kind: "indeterminate",
+      service: "wsmtxca",
+      operation: "autorizarComprobante",
+      reason: "transport_error",
+    });
+    expect(options.soap.execute).toHaveBeenCalledOnce();
   });
 
   it("queries the last authorized voucher using the default tax id", async () => {
@@ -289,6 +427,223 @@ describe("createWsmtxcaService", () => {
       name: "ArcaServiceError",
       message:
         "Error 514: El Importe IVA del ítem no debe informarse | Obs 504: Código de producto sin GS1 válido",
+    });
+  });
+
+  it("normalizes WSMTXCA latest error 1502 to an empty sequence", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        consultarUltimoComprobanteAutorizadoResponse: {
+          arrayErrores: {
+            codigoDescripcion: {
+              codigo: 1502,
+              descripcion: "No existen comprobantes autorizados",
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(options).getLastAuthorizedVoucher({
+        voucherType: 1,
+        salesPoint: 4,
+      })
+    ).resolves.toMatchObject({
+      voucherNumber: 0,
+    });
+  });
+
+  it("normalizes only WSMTXCA consult 1503 as exact voucher absence", async () => {
+    const notFoundOptions = createBaseOptions();
+    notFoundOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        consultarComprobanteResponse: {
+          arrayErrores: {
+            codigoDescripcion: {
+              codigo: 1503,
+              descripcion: "El comprobante debe existir",
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(notFoundOptions).lookupVoucher({
+        voucherType: 6,
+        salesPoint: 8,
+        voucherNumber: 25,
+      })
+    ).resolves.toMatchObject({
+      kind: "not_found",
+      service: "wsmtxca",
+      operation: "consultarComprobante",
+      errors: [{ code: "1503" }],
+    });
+
+    const caeaErrorOptions = createBaseOptions();
+    caeaErrorOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        consultarComprobanteResponse: {
+          arrayErrores: {
+            codigoDescripcion: {
+              codigo: 602,
+              descripcion: "Validación de fecha CAEA",
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(caeaErrorOptions).lookupVoucher({
+        voucherType: 6,
+        salesPoint: 8,
+        voucherNumber: 25,
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaServiceError",
+      service: "wsmtxca",
+      operation: "consultarComprobante",
+      serviceCode: "602",
+    });
+
+    const mixedOptions = createBaseOptions();
+    mixedOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        consultarComprobanteResponse: {
+          arrayErrores: {
+            codigoDescripcion: [
+              { codigo: 1503, descripcion: "El comprobante debe existir" },
+              { codigo: 602, descripcion: "Validación de fecha CAEA" },
+            ],
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(mixedOptions).lookupVoucher({
+        voucherType: 6,
+        salesPoint: 8,
+        voucherNumber: 25,
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaServiceError",
+      operation: "consultarComprobante",
+    });
+  });
+
+  it("returns typed WSMTXCA voucher identity and monetary fields", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        consultarComprobanteResponse: {
+          comprobante: {
+            codigoTipoComprobante: 6,
+            numeroPuntoVenta: 8,
+            numeroComprobante: 25,
+            fechaEmision: "20260301",
+            codigoAutorizacion: "74123456789012",
+            fechaVencimiento: "20260311",
+            codigoTipoDocumento: 80,
+            numeroDocumento: "30717329654",
+            condicionIVAReceptor: 1,
+            importeGravado: "100.00",
+            importeNoGravado: "0.00",
+            importeExento: "0.00",
+            importeSubtotal: "100.00",
+            importeOtrosTributos: "2.00",
+            importeTotal: "123.00",
+            arraySubtotalesIVA: {
+              subtotalIVA: [
+                { codigo: 5, importe: "20.00" },
+                { codigo: 4, importe: "1.00" },
+              ],
+            },
+            codigoMoneda: "PES",
+            cotizacionMoneda: "1.00",
+            codigoConcepto: 1,
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(options).lookupVoucher({
+        voucherType: 6,
+        salesPoint: 8,
+        voucherNumber: 25,
+      })
+    ).resolves.toMatchObject({
+      kind: "found",
+      voucher: {
+        voucherType: 6,
+        salesPoint: 8,
+        voucherNumber: 25,
+        invoiceDate: "2026-03-01",
+        cae: "74123456789012",
+        caeExpiry: "2026-03-11",
+        documentType: 80,
+        documentNumber: "30717329654",
+        receiverVatConditionId: 1,
+        taxableAmount: 100,
+        nonTaxableAmount: 0,
+        exemptAmount: 0,
+        subtotalAmount: 100,
+        taxAmount: 2,
+        vatAmount: 21,
+        totalAmount: 123,
+        currencyId: "PES",
+        exchangeRate: 1,
+        concept: 1,
+      },
+    });
+  });
+
+  it("queries WSMTXCA sales points from the source service", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        consultarPuntosVentaResponse: {
+          arrayPuntosVenta: {
+            puntoVenta: [
+              { numeroPuntoVenta: 1, bloqueado: "N" },
+              {
+                numeroPuntoVenta: "2",
+                bloqueado: "S",
+                fechaBaja: "20260301",
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsmtxcaService(options).getSalesPoints({
+        representedTaxId: "20304050607",
+      })
+    ).resolves.toMatchObject({
+      salesPoints: [
+        { number: 1, blocked: false },
+        { number: 2, blocked: true, deletedAt: "2026-03-01" },
+      ],
+    });
+    expect(options.soap.execute).toHaveBeenCalledWith({
+      service: "wsmtxca",
+      operation: "consultarPuntosVenta",
+      bodyElementName: "consultarPuntosVentaRequest",
+      bodyElementNamespaceMode: "prefix",
+      body: {
+        authRequest: {
+          token: "token",
+          sign: "sign",
+          cuitRepresentada: 20_304_050_607,
+        },
+      },
     });
   });
 

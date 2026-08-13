@@ -47,6 +47,21 @@ describe("errors", () => {
     const serviceError = new ArcaServiceError("service", {
       cause,
       serviceCode: 10_017,
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      result: "R",
+      resultLevel: "detail",
+      results: { header: "R", detail: "R" },
+      issues: [
+        {
+          service: "wsfe",
+          operation: "FECAESolicitar",
+          source: "observation",
+          category: "business",
+          code: "10017",
+          message: "Fecha inválida",
+        },
+      ],
       detail: { field: "CbteTipo" },
     });
 
@@ -94,6 +109,21 @@ describe("errors", () => {
       name: "ArcaServiceError",
       code: "ARCA_SERVICE_ERROR",
       serviceCode: 10_017,
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      result: "R",
+      resultLevel: "detail",
+      results: { header: "R", detail: "R" },
+      issues: [
+        {
+          service: "wsfe",
+          operation: "FECAESolicitar",
+          source: "observation",
+          category: "business",
+          code: "10017",
+          message: "Fecha inválida",
+        },
+      ],
       detail: { field: "CbteTipo" },
     });
   });

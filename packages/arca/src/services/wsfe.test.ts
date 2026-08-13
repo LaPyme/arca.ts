@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ArcaTransportError } from "../errors";
 import type { WsfeVoucherInput } from "./wsfe";
 import { createWsfeService } from "./wsfe";
 
@@ -128,6 +129,214 @@ describe("createWsfeService", () => {
         }),
       })
     );
+  });
+
+  it("returns authorized evidence with every WSFE observation", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeCabResp: { Resultado: "A" },
+            FeDetResp: {
+              FECAEDetResponse: {
+                Resultado: "A",
+                CAE: "123456789",
+                CAEFchVto: "20260501",
+                Observaciones: {
+                  Obs: [
+                    { Code: 10_041, Msg: "Primera observación" },
+                    { Code: 10_042, Msg: "Segunda observación" },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const outcome = await createWsfeService(options).authorizeVoucherOutcome({
+      data: createBaseVoucherInput(),
+      voucherNumber: 77,
+    });
+
+    expect(outcome).toMatchObject({
+      kind: "authorized",
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      result: "A",
+      resultLevel: "detail",
+      results: { header: "A", detail: "A" },
+      cae: "123456789",
+      caeExpiry: "20260501",
+      voucherNumber: 77,
+      errors: [],
+      observations: [
+        {
+          source: "observation",
+          category: "observation",
+          code: "10041",
+          message: "Primera observación",
+        },
+        {
+          source: "observation",
+          category: "observation",
+          code: "10042",
+          message: "Segunda observación",
+        },
+      ],
+    });
+    expect(options.soap.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "FECAESolicitar",
+        retries: 0,
+      })
+    );
+  });
+
+  it("classifies detail and header WSFE rejections from structured results", async () => {
+    const detailOptions = createBaseOptions();
+    detailOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: {
+                Resultado: "R",
+                Observaciones: {
+                  Obs: [
+                    { Code: 10_016, Msg: "Número incorrecto" },
+                    { Code: 10_017, Msg: "Fecha inválida" },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsfeService(detailOptions).authorizeVoucherOutcome({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+      })
+    ).resolves.toMatchObject({
+      kind: "rejected",
+      result: "R",
+      resultLevel: "detail",
+      observations: [
+        { code: "10016", message: "Número incorrecto" },
+        { code: "10017", message: "Fecha inválida" },
+      ],
+    });
+
+    const headerOptions = createBaseOptions();
+    headerOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeCabResp: { Resultado: "R" },
+            Errors: {
+              Err: [
+                { Code: 10_002, Msg: "CantReg inválido" },
+                { Code: 1005, Msg: "Punto de venta inválido" },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsfeService(headerOptions).authorizeVoucherOutcome({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+      })
+    ).resolves.toMatchObject({
+      kind: "rejected",
+      result: "R",
+      resultLevel: "header",
+      errors: [
+        { category: "business", code: "10002" },
+        { category: "business", code: "1005" },
+      ],
+    });
+  });
+
+  it("keeps WSFE infrastructure and contradictory responses indeterminate", async () => {
+    const infrastructureOptions = createBaseOptions();
+    infrastructureOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeCabResp: { Resultado: "R" },
+            Errors: {
+              Err: { Code: 502, Msg: "Transacción activa" },
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsfeService(infrastructureOptions).authorizeVoucherOutcome({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+      })
+    ).resolves.toMatchObject({
+      kind: "indeterminate",
+      result: "R",
+      reason: "incomplete_response",
+      errors: [{ category: "infrastructure", code: "502" }],
+    });
+
+    const contradictoryOptions = createBaseOptions();
+    contradictoryOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeCabResp: { Resultado: "A" },
+            FeDetResp: {
+              FECAEDetResponse: { Resultado: "R", CAE: "123" },
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsfeService(contradictoryOptions).authorizeVoucherOutcome({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+      })
+    ).resolves.toMatchObject({
+      kind: "indeterminate",
+      reason: "contradictory_response",
+      results: { header: "A", detail: "R" },
+      cae: "123",
+    });
+  });
+
+  it("returns transport failures as indeterminate without retrying authorization", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockRejectedValueOnce(
+      new ArcaTransportError("connection lost")
+    );
+
+    await expect(
+      createWsfeService(options).authorizeVoucherOutcome({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+      })
+    ).resolves.toMatchObject({
+      kind: "indeterminate",
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      reason: "transport_error",
+    });
+    expect(options.soap.execute).toHaveBeenCalledOnce();
   });
 
   it("creates the next voucher and wraps WSFE collection fields", async () => {
@@ -689,7 +898,24 @@ describe("createWsfeService", () => {
               ResultGet: {
                 CbteDesde: 77,
                 CbteHasta: 77,
+                CbteFch: "20260501",
+                PtoVta: 1,
+                CbteTipo: 6,
+                Concepto: 1,
+                DocTipo: 80,
+                DocNro: "30717329654",
+                CondicionIVAReceptorId: 1,
+                ImpTotal: 121,
+                ImpTotConc: 0,
+                ImpNeto: 100,
+                ImpOpEx: 0,
+                ImpTrib: 0,
+                ImpIVA: 21,
+                MonId: "PES",
+                MonCotiz: 1,
                 Resultado: "A",
+                CodAutorizacion: "74123456789012",
+                FchVto: "20260511",
               },
             },
           },
@@ -743,16 +969,131 @@ describe("createWsfeService", () => {
       })
     ).resolves.toEqual({
       voucherNumber: 77,
+      voucherDate: "20260501",
+      salesPoint: 1,
+      voucherType: 6,
+      concept: 1,
+      documentType: 80,
+      documentNumber: "30717329654",
+      receiverVatConditionId: 1,
+      totalAmount: 121,
+      nonTaxableAmount: 0,
+      netAmount: 100,
+      exemptAmount: 0,
+      taxAmount: 0,
+      vatAmount: 21,
+      currencyId: "PES",
+      exchangeRate: 1,
       result: "A",
+      cae: "74123456789012",
+      caeExpiry: "20260511",
       raw: {
         CbteDesde: 77,
         CbteHasta: 77,
+        CbteFch: "20260501",
+        PtoVta: 1,
+        CbteTipo: 6,
+        Concepto: 1,
+        DocTipo: 80,
+        DocNro: "30717329654",
+        CondicionIVAReceptorId: 1,
+        ImpTotal: 121,
+        ImpTotConc: 0,
+        ImpNeto: 100,
+        ImpOpEx: 0,
+        ImpTrib: 0,
+        ImpIVA: 21,
+        MonId: "PES",
+        MonCotiz: 1,
         Resultado: "A",
+        CodAutorizacion: "74123456789012",
+        FchVto: "20260511",
       },
     });
     expect(options.auth.login).toHaveBeenLastCalledWith("wsfe", {
       representedTaxId: "20304050607",
       forceRefresh: true,
+    });
+  });
+
+  it("normalizes only FECompConsultar 602 as voucher absence", async () => {
+    const notFoundOptions = createBaseOptions();
+    notFoundOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECompConsultarResponse: {
+          FECompConsultarResult: {
+            Errors: {
+              Err: { Code: 602, Msg: "No existen datos" },
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsfeService(notFoundOptions).lookupVoucher({
+        number: 77,
+        salesPoint: 1,
+        voucherType: 6,
+      })
+    ).resolves.toMatchObject({
+      kind: "not_found",
+      service: "wsfe",
+      operation: "FECompConsultar",
+      errors: [{ code: "602", message: "No existen datos" }],
+    });
+
+    const unavailableOptions = createBaseOptions();
+    unavailableOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECompConsultarResponse: {
+          FECompConsultarResult: {
+            Errors: {
+              Err: { Code: 500, Msg: "Servicio no disponible" },
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsfeService(unavailableOptions).lookupVoucher({
+        number: 77,
+        salesPoint: 1,
+        voucherType: 6,
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaServiceError",
+      service: "wsfe",
+      operation: "FECompConsultar",
+      serviceCode: "500",
+    });
+
+    const mixedOptions = createBaseOptions();
+    mixedOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECompConsultarResponse: {
+          FECompConsultarResult: {
+            Errors: {
+              Err: [
+                { Code: 602, Msg: "No existen datos" },
+                { Code: 500, Msg: "Servicio no disponible" },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    await expect(
+      createWsfeService(mixedOptions).lookupVoucher({
+        number: 77,
+        salesPoint: 1,
+        voucherType: 6,
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaServiceError",
+      operation: "FECompConsultar",
     });
   });
 

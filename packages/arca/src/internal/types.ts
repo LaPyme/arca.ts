@@ -91,6 +91,8 @@ export type ArcaAuthOptions = {
 export type ArcaSoapExecutionOptions<TBody> = {
   service: ArcaServiceName;
   operation: string;
+  /** Overrides client-level retries for this operation. Use zero for fiscal authorization. */
+  retries?: number;
   bodyElementName?: string;
   bodyElementNamespaceMode?: "default" | "prefix";
   body: TBody;
