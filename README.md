@@ -91,7 +91,43 @@ console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
 
 ### WSMTXCA
 
-WSMTXCA remains supported and exported, but this package currently puts most editorial focus on WSFE and Padrón. If you need `authorizeVoucher`, `getLastAuthorizedVoucher`, or `getVoucher`, the runtime API is available and covered by tests.
+WSMTXCA remains supported and exported, but this package currently puts most editorial focus on WSFE and Padrón. If you need `authorizeVoucher`, `authorizeVoucherOutcome`, `getLastAuthorizedVoucher`, `lookupVoucher`, `getVoucher`, or `getSalesPoints`, the runtime API is available and covered by tests.
+
+## Exact authorization and recovery evidence
+
+Use `authorizeVoucherOutcome(...)` when your application must decide whether one exact fiscal attempt was authorized, rejected, or left indeterminate. It preserves every structured error and observation with its service, operation, code, source, and result level.
+
+```ts
+const outcome = await client.wsfe.authorizeVoucherOutcome({
+  voucherNumber: 100,
+  data,
+});
+
+if (outcome.kind === "authorized") {
+  console.log(outcome.cae, outcome.voucherNumber);
+} else if (outcome.kind === "rejected") {
+  console.error(outcome.errors, outcome.observations);
+} else {
+  // Consult voucher 100 before any new authorization attempt.
+  const lookup = await client.wsfe.lookupVoucher({
+    number: 100,
+    salesPoint: data.salesPoint,
+    voucherType: data.voucherType,
+  });
+  console.log(lookup.kind);
+}
+```
+
+Authorization outcome methods force one SOAP transport attempt, even when the client has general transport retries configured. This prevents a timeout from causing a hidden second authorization. Read-only operations still use the configured retry policy. The compatibility `authorizeVoucher(...)` methods keep their success-or-throw contract.
+
+Exact lookup absence is operation-specific:
+
+- WSFE `FECompConsultar` code 602 returns `not_found`.
+- WSMTXCA `consultarComprobante` code 1503 returns `not_found`.
+- WSMTXCA `consultarUltimoComprobanteAutorizado` code 1502 returns voucher number `0`.
+- WSMTXCA code 602 is not exact-voucher absence and remains an error.
+
+The SDK normalizes provider protocol evidence only. Your application remains responsible for persisting the exact request, owning its sequence or lane, and deciding when a retry is safe.
 
 ## Examples
 

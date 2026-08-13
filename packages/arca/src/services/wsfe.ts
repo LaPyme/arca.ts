@@ -1,7 +1,20 @@
-import { ArcaInputError, ArcaServiceError } from "../errors";
+import {
+  ArcaInputError,
+  ArcaInvalidSoapResponseError,
+  ArcaServiceError,
+  ArcaSoapFaultError,
+  ArcaTransportError,
+} from "../errors";
 import type { ArcaClientConfig, ArcaRepresentedTaxId } from "../internal/types";
 import type { SoapTransport } from "../soap";
 import type { WsaaAuthModule } from "../wsaa";
+import type {
+  ArcaAuthorizationIndeterminateReason,
+  ArcaAuthorizationOutcome,
+  ArcaFiscalIssue,
+  ArcaFiscalResultLevel,
+  ArcaVoucherLookupResult,
+} from "./fiscal-evidence";
 
 /** Accepted public date inputs for WSFE request fields. */
 export type WsfeDateInput =
@@ -103,6 +116,9 @@ export type WsfeAuthorizationResult = {
   raw: Record<string, unknown>;
 };
 
+/** Structured evidence from one exact WSFE authorization attempt. */
+export type WsfeAuthorizationOutcome = ArcaAuthorizationOutcome<"wsfe">;
+
 /** A point-of-sale entry returned by {@link WsfeService.getSalesPoints}. */
 export type WsfeSalesPoint = {
   number: number;
@@ -117,12 +133,29 @@ export type WsfeVoucherInfo = {
   voucherDate?: string;
   salesPoint?: number;
   voucherType?: number;
+  concept?: number;
+  documentType?: number;
+  documentNumber?: string;
+  receiverVatConditionId?: number;
   totalAmount?: number;
+  nonTaxableAmount?: number;
+  netAmount?: number;
+  exemptAmount?: number;
+  taxAmount?: number;
+  vatAmount?: number;
+  currencyId?: string;
+  exchangeRate?: number;
   result?: string;
   cae?: string;
   caeExpiry?: string;
   raw: Record<string, unknown>;
 };
+
+/** Typed exact-voucher consultation result for WSFE. */
+export type WsfeVoucherLookupResult = ArcaVoucherLookupResult<
+  WsfeVoucherInfo,
+  "wsfe"
+>;
 
 export type WsfeCatalogEntry = {
   id: number;
@@ -158,6 +191,13 @@ export type WsfeQuotation = {
 
 /** WSFE electronic invoicing service. */
 export type WsfeService = {
+  /**
+   * Attempts one exact authorization without transport retries and returns
+   * structured provider evidence instead of flattening the result to throw/success.
+   */
+  authorizeVoucherOutcome(
+    input: WsfeAuthorizeVoucherInput
+  ): Promise<WsfeAuthorizationOutcome>;
   /** Authorizes a voucher with the explicit number sent as `CbteDesde` and `CbteHasta`. */
   authorizeVoucher(
     input: WsfeAuthorizeVoucherInput
@@ -252,6 +292,14 @@ export type WsfeService = {
     voucherType: number;
     forceRefresh?: boolean;
   }): Promise<WsfeVoucherInfo | null>;
+  /** Consults one exact voucher and normalizes WSFE error 602 to `not_found`. */
+  lookupVoucher(input: {
+    representedTaxId?: number | string;
+    number: number;
+    salesPoint: number;
+    voucherType: number;
+    forceRefresh?: boolean;
+  }): Promise<WsfeVoucherLookupResult>;
 };
 
 export type CreateWsfeServiceOptions = {
@@ -293,13 +341,14 @@ type NormalizedWsfeVoucherInput = Omit<
 export function createWsfeService(
   options: CreateWsfeServiceOptions
 ): WsfeService {
-  async function executeWsfeAuthenticatedOperation(
+  async function executeWsfeAuthenticatedRawOperation(
     operation: string,
     input: {
       representedTaxId?: ArcaRepresentedTaxId;
       forceRefresh?: boolean;
     },
-    body: Record<string, unknown> = {}
+    body: Record<string, unknown> = {},
+    retries?: number
   ) {
     const auth = await options.auth.login("wsfe", {
       representedTaxId: input.representedTaxId,
@@ -311,6 +360,7 @@ export function createWsfeService(
     >({
       service: "wsfe",
       operation,
+      ...(retries === undefined ? {} : { retries }),
       body: {
         Auth: createWsfeAuth(
           input.representedTaxId ?? options.config.taxId,
@@ -321,7 +371,24 @@ export function createWsfeService(
       },
     });
 
-    return unwrapWsfeOperationResult(operation, response.result);
+    return unwrapWsfeOperationEnvelope(operation, response.result);
+  }
+
+  async function executeWsfeAuthenticatedOperation(
+    operation: string,
+    input: {
+      representedTaxId?: ArcaRepresentedTaxId;
+      forceRefresh?: boolean;
+    },
+    body: Record<string, unknown> = {}
+  ) {
+    const result = await executeWsfeAuthenticatedRawOperation(
+      operation,
+      input,
+      body
+    );
+    throwForWsfeOperationErrors(operation, result);
+    return result;
   }
 
   async function executeWsfeOperation(
@@ -337,7 +404,9 @@ export function createWsfeService(
       body,
     });
 
-    return unwrapWsfeOperationResult(operation, response.result);
+    const result = unwrapWsfeOperationEnvelope(operation, response.result);
+    throwForWsfeOperationErrors(operation, result);
+    return result;
   }
 
   async function getNextVoucherNumber({
@@ -395,6 +464,21 @@ export function createWsfeService(
     });
   }
 
+  function authorizeVoucherOutcome({
+    representedTaxId,
+    data,
+    voucherNumber,
+    forceRefresh,
+  }: WsfeAuthorizeVoucherInput): Promise<WsfeAuthorizationOutcome> {
+    const normalizedInput = normalizeWsfeVoucherInput(data);
+    return executeWsfeAuthorization({
+      representedTaxId,
+      data: normalizedInput,
+      voucherNumber,
+      forceRefresh,
+    }).then(({ outcome }) => outcome);
+  }
+
   async function authorizeNormalizedVoucher({
     representedTaxId,
     data: normalizedInput,
@@ -406,57 +490,155 @@ export function createWsfeService(
     voucherNumber: number;
     forceRefresh?: boolean;
   }): Promise<WsfeAuthorizationResult> {
-    const requestData = mapWsfeVoucherInput(normalizedInput, voucherNumber);
-
-    const auth = await options.auth.login("wsfe", {
+    const execution = await executeWsfeAuthorization({
       representedTaxId,
+      data: normalizedInput,
+      voucherNumber,
       forceRefresh,
     });
-    const response = await options.soap.execute<
-      Record<string, unknown>,
-      Record<string, unknown>
-    >({
-      service: "wsfe",
-      operation: "FECAESolicitar",
-      body: {
-        Auth: createWsfeAuth(
-          representedTaxId ?? options.config.taxId,
-          auth.token,
-          auth.sign
-        ),
-        FeCAEReq: {
-          FeCabReq: {
-            CantReg: 1,
-            PtoVta: normalizedInput.salesPoint,
-            CbteTipo: normalizedInput.voucherType,
-          },
-          FeDetReq: {
-            FECAEDetRequest: requestData,
-          },
-        },
-      },
-    });
 
-    const result = unwrapWsfeOperationResult("FECAESolicitar", response.result);
-    const detailResponse = normalizeWsfeDetailResponse(result);
-    const cae = detailResponse.CAE;
-    const caeExpiry = detailResponse.CAEFchVto;
+    if (execution.error) {
+      throw execution.error;
+    }
 
-    if (typeof cae !== "string" || typeof caeExpiry !== "string") {
+    if (execution.outcome.kind !== "authorized") {
+      throw createWsfeOutcomeError(execution.outcome);
+    }
+
+    const { cae, caeExpiry, raw } = execution.outcome;
+    if (!(caeExpiry && raw)) {
       throw new ArcaServiceError("WSFE did not return CAE authorization data", {
-        detail: result,
+        service: "wsfe",
+        operation: "FECAESolicitar",
+        result: execution.outcome.result,
+        resultLevel: execution.outcome.resultLevel,
+        results: execution.outcome.results,
+        cae,
+        issues: [
+          ...execution.outcome.errors,
+          ...execution.outcome.observations,
+        ],
+        detail: raw,
       });
     }
 
     return {
       cae,
-      caeExpiry: String(caeExpiry),
+      caeExpiry,
       voucherNumber,
+      raw,
+    };
+  }
+
+  async function executeWsfeAuthorization({
+    representedTaxId,
+    data: normalizedInput,
+    voucherNumber,
+    forceRefresh,
+  }: {
+    representedTaxId?: number | string;
+    data: NormalizedWsfeVoucherInput;
+    voucherNumber: number;
+    forceRefresh?: boolean;
+  }): Promise<{
+    outcome: WsfeAuthorizationOutcome;
+    error?: unknown;
+  }> {
+    const requestData = mapWsfeVoucherInput(normalizedInput, voucherNumber);
+
+    try {
+      const result = await executeWsfeAuthenticatedRawOperation(
+        "FECAESolicitar",
+        { representedTaxId, forceRefresh },
+        {
+          FeCAEReq: {
+            FeCabReq: {
+              CantReg: 1,
+              PtoVta: normalizedInput.salesPoint,
+              CbteTipo: normalizedInput.voucherType,
+            },
+            FeDetReq: {
+              FECAEDetRequest: requestData,
+            },
+          },
+        },
+        0
+      );
+
+      return {
+        outcome: classifyWsfeAuthorization(result, voucherNumber),
+      };
+    } catch (error) {
+      return {
+        outcome: createWsfeIndeterminateOutcome(error),
+        error,
+      };
+    }
+  }
+
+  async function lookupVoucher({
+    representedTaxId,
+    number,
+    salesPoint,
+    voucherType,
+    forceRefresh,
+  }: {
+    representedTaxId?: number | string;
+    number: number;
+    salesPoint: number;
+    voucherType: number;
+    forceRefresh?: boolean;
+  }): Promise<WsfeVoucherLookupResult> {
+    const operation = "FECompConsultar";
+    const result = await executeWsfeAuthenticatedRawOperation(
+      operation,
+      { representedTaxId, forceRefresh },
+      {
+        FeCompConsReq: {
+          CbteNro: number,
+          PtoVta: salesPoint,
+          CbteTipo: voucherType,
+        },
+      }
+    );
+    const errors = extractWsfeGlobalIssues(result, operation);
+
+    if (errors.length > 0 && errors.every((issue) => issue.code === "602")) {
+      return {
+        kind: "not_found",
+        service: "wsfe",
+        operation,
+        errors,
+        observations: [],
+        raw: result,
+      };
+    }
+
+    if (errors.length > 0) {
+      throw createWsfeServiceError(operation, result, errors);
+    }
+
+    const raw = toWsfeRecord(result.ResultGet);
+    if (!raw) {
+      throw new ArcaServiceError("WSFE did not return the consulted voucher", {
+        service: "wsfe",
+        operation,
+        detail: result,
+      });
+    }
+
+    return {
+      kind: "found",
+      service: "wsfe",
+      operation,
+      voucher: mapWsfeVoucherInfo(raw),
+      observations: [],
       raw: result,
     };
   }
 
   return {
+    authorizeVoucherOutcome,
     authorizeVoucher,
     async createNextVoucher({ representedTaxId, data, forceRefresh }) {
       const normalizedInput = normalizeWsfeVoucherInput(data);
@@ -573,33 +755,11 @@ export function createWsfeService(
         (result.ResultGet as Record<string, unknown> | undefined) ?? {};
       return mapWsfeQuotation(raw);
     },
-    async getVoucherInfo({
-      representedTaxId,
-      number,
-      salesPoint,
-      voucherType,
-      forceRefresh,
-    }) {
-      const result = await executeWsfeAuthenticatedOperation(
-        "FECompConsultar",
-        {
-          representedTaxId,
-          forceRefresh,
-        },
-        {
-          FeCompConsReq: {
-            CbteNro: number,
-            PtoVta: salesPoint,
-            CbteTipo: voucherType,
-          },
-        }
-      );
-      const raw = (result.ResultGet as Record<string, unknown> | null) ?? null;
-      if (!raw) {
-        return null;
-      }
-      return mapWsfeVoucherInfo(raw);
+    async getVoucherInfo(input) {
+      const lookup = await lookupVoucher(input);
+      return lookup.kind === "found" ? lookup.voucher : null;
     },
+    lookupVoucher,
   };
 }
 
@@ -941,23 +1101,47 @@ function mapWsfeQuotation(raw: Record<string, unknown>): WsfeQuotation {
 }
 
 function mapWsfeVoucherInfo(raw: Record<string, unknown>): WsfeVoucherInfo {
-  return {
+  const voucher: WsfeVoucherInfo = {
     voucherNumber: Number(raw.CbteDesde ?? raw.CbteHasta ?? 0),
-    ...(raw.CbteFch === undefined ? {} : { voucherDate: String(raw.CbteFch) }),
-    ...(raw.PtoVta === undefined ? {} : { salesPoint: Number(raw.PtoVta) }),
-    ...(raw.CbteTipo === undefined
-      ? {}
-      : { voucherType: Number(raw.CbteTipo) }),
-    ...(raw.ImpTotal === undefined
-      ? {}
-      : { totalAmount: Number(raw.ImpTotal) }),
-    ...(raw.Resultado === undefined ? {} : { result: String(raw.Resultado) }),
-    ...(raw.CAE === undefined ? {} : { cae: String(raw.CAE) }),
-    ...(raw.CAEFchVto === undefined
-      ? {}
-      : { caeExpiry: String(raw.CAEFchVto) }),
     raw,
   };
+
+  assignWsfeValue(voucher, "voucherDate", normalizeWsfeString(raw.CbteFch));
+  assignWsfeValue(voucher, "salesPoint", normalizeWsfeNumber(raw.PtoVta));
+  assignWsfeValue(voucher, "voucherType", normalizeWsfeNumber(raw.CbteTipo));
+  assignWsfeValue(voucher, "concept", normalizeWsfeNumber(raw.Concepto));
+  assignWsfeValue(voucher, "documentType", normalizeWsfeNumber(raw.DocTipo));
+  assignWsfeValue(voucher, "documentNumber", normalizeWsfeString(raw.DocNro));
+  assignWsfeValue(
+    voucher,
+    "receiverVatConditionId",
+    normalizeWsfeNumber(raw.CondicionIVAReceptorId)
+  );
+  assignWsfeValue(voucher, "totalAmount", normalizeWsfeNumber(raw.ImpTotal));
+  assignWsfeValue(
+    voucher,
+    "nonTaxableAmount",
+    normalizeWsfeNumber(raw.ImpTotConc)
+  );
+  assignWsfeValue(voucher, "netAmount", normalizeWsfeNumber(raw.ImpNeto));
+  assignWsfeValue(voucher, "exemptAmount", normalizeWsfeNumber(raw.ImpOpEx));
+  assignWsfeValue(voucher, "taxAmount", normalizeWsfeNumber(raw.ImpTrib));
+  assignWsfeValue(voucher, "vatAmount", normalizeWsfeNumber(raw.ImpIVA));
+  assignWsfeValue(voucher, "currencyId", normalizeWsfeString(raw.MonId));
+  assignWsfeValue(voucher, "exchangeRate", normalizeWsfeNumber(raw.MonCotiz));
+  assignWsfeValue(voucher, "result", normalizeWsfeString(raw.Resultado));
+  assignWsfeValue(
+    voucher,
+    "cae",
+    normalizeWsfeString(raw.CodAutorizacion ?? raw.CAE)
+  );
+  assignWsfeValue(
+    voucher,
+    "caeExpiry",
+    normalizeWsfeString(raw.FchVto ?? raw.CAEFchVto)
+  );
+
+  return voucher;
 }
 
 function createWsfeAuth(
@@ -972,7 +1156,7 @@ function createWsfeAuth(
   };
 }
 
-function unwrapWsfeOperationResult(
+function unwrapWsfeOperationEnvelope(
   operation: string,
   response: Record<string, unknown>
 ) {
@@ -983,48 +1167,17 @@ function unwrapWsfeOperationResult(
     response[`${operation}Result`] ??
     response) as Record<string, unknown>;
 
-  if (operation === "FECAESolicitar") {
-    const detailResponse = normalizeWsfeDetailResponse(result);
-    const resultCode = detailResponse.Resultado;
-    if (resultCode && resultCode !== "A") {
-      const observationsContainer = detailResponse.Observaciones as
-        | Record<string, unknown>
-        | undefined;
-      const observations = normalizeWsfeErrors(observationsContainer?.Obs);
-      if (observations.length > 0) {
-        const firstObservation = observations[0];
-        if (!firstObservation) {
-          throw new ArcaServiceError(
-            "WSFE returned an empty observation list",
-            {
-              detail: result,
-            }
-          );
-        }
-        throw new ArcaServiceError(firstObservation.message, {
-          serviceCode: firstObservation.code,
-          detail: result,
-        });
-      }
-    }
-  }
-
-  const errorsContainer = result.Errors as Record<string, unknown> | undefined;
-  const errors = normalizeWsfeErrors(errorsContainer?.Err);
-  if (errors.length > 0) {
-    const firstError = errors[0];
-    if (!firstError) {
-      throw new ArcaServiceError("WSFE returned an empty error list", {
-        detail: result,
-      });
-    }
-    throw new ArcaServiceError(firstError.message, {
-      serviceCode: firstError.code,
-      detail: result,
-    });
-  }
-
   return result;
+}
+
+function throwForWsfeOperationErrors(
+  operation: string,
+  result: Record<string, unknown>
+) {
+  const errors = extractWsfeGlobalIssues(result, operation);
+  if (errors.length > 0) {
+    throw createWsfeServiceError(operation, result, errors);
+  }
 }
 
 function normalizeWsfeDetailResponse(result: Record<string, unknown>) {
@@ -1040,7 +1193,303 @@ function normalizeWsfeDetailResponse(result: Record<string, unknown>) {
   return (rawDetail as Record<string, unknown> | undefined) ?? {};
 }
 
-function normalizeWsfeErrors(rawErrors: unknown) {
+function classifyWsfeAuthorization(
+  result: Record<string, unknown>,
+  voucherNumber: number
+): WsfeAuthorizationOutcome {
+  const operation = "FECAESolicitar";
+  const header = toWsfeRecord(result.FeCabResp) ?? {};
+  const detail = normalizeWsfeDetailResponse(result);
+  const headerResult = normalizeWsfeResult(header.Resultado);
+  const detailResult = normalizeWsfeResult(detail.Resultado);
+  const resultCode = detailResult ?? headerResult;
+  const resultLevel = getWsfeResultLevel(headerResult, detailResult);
+  const cae = normalizeWsfeString(detail.CAE);
+  const caeExpiry = normalizeWsfeString(detail.CAEFchVto);
+  const errors = extractWsfeGlobalIssues(result, operation, "header");
+  const observations = extractWsfeObservations(
+    detail,
+    detailResult === "R" ? "business" : "observation"
+  );
+  const hasInfrastructureError = errors.some(
+    (issue) => issue.category === "infrastructure"
+  );
+  const base = {
+    service: "wsfe" as const,
+    operation,
+    results: createWsfeResults(headerResult, detailResult),
+    errors,
+    observations,
+    raw: result,
+  };
+  const context: WsfeAuthorizationContext = {
+    base,
+    headerResult,
+    detailResult,
+    resultCode,
+    resultLevel,
+    cae,
+    caeExpiry,
+  };
+
+  if (hasContradictoryWsfeResults(context)) {
+    return createWsfeStructuredIndeterminate(context, "contradictory_response");
+  }
+
+  if (hasInfrastructureError) {
+    return createWsfeStructuredIndeterminate(context, "incomplete_response");
+  }
+
+  if (isAuthorizedWsfeContext(context)) {
+    return {
+      ...base,
+      kind: "authorized",
+      result: "A",
+      resultLevel: "detail",
+      cae: context.cae,
+      caeExpiry: context.caeExpiry,
+      voucherNumber,
+    };
+  }
+
+  if (isRejectedWsfeDetailContext(context)) {
+    return {
+      ...base,
+      kind: "rejected",
+      result: "R",
+      resultLevel: "detail",
+    };
+  }
+
+  if (isRejectedWsfeHeaderContext(context)) {
+    return {
+      ...base,
+      kind: "rejected",
+      result: "R",
+      resultLevel: "header",
+    };
+  }
+
+  return createWsfeStructuredIndeterminate(
+    context,
+    hasWsfeCaeContradiction(context)
+      ? "contradictory_response"
+      : "incomplete_response"
+  );
+}
+
+type WsfeAuthorizationContext = {
+  base: {
+    service: "wsfe";
+    operation: string;
+    results: { header?: string; detail?: string };
+    errors: ArcaFiscalIssue[];
+    observations: ArcaFiscalIssue[];
+    raw: Record<string, unknown>;
+  };
+  headerResult?: string;
+  detailResult?: string;
+  resultCode?: string;
+  resultLevel?: ArcaFiscalResultLevel;
+  cae?: string;
+  caeExpiry?: string;
+};
+
+function getWsfeResultLevel(
+  headerResult?: string,
+  detailResult?: string
+): ArcaFiscalResultLevel | undefined {
+  if (detailResult) {
+    return "detail";
+  }
+  return headerResult ? "header" : undefined;
+}
+
+function hasContradictoryWsfeResults(context: WsfeAuthorizationContext) {
+  return Boolean(
+    context.headerResult &&
+      context.detailResult &&
+      context.headerResult !== context.detailResult
+  );
+}
+
+function isAuthorizedWsfeContext(
+  context: WsfeAuthorizationContext
+): context is WsfeAuthorizationContext & { cae: string; caeExpiry: string } {
+  return Boolean(
+    context.detailResult === "A" &&
+      context.headerResult !== "R" &&
+      context.base.errors.length === 0 &&
+      context.cae &&
+      context.caeExpiry
+  );
+}
+
+function isRejectedWsfeDetailContext(context: WsfeAuthorizationContext) {
+  return (
+    context.detailResult === "R" && context.headerResult !== "A" && !context.cae
+  );
+}
+
+function isRejectedWsfeHeaderContext(context: WsfeAuthorizationContext) {
+  return (
+    context.headerResult === "R" &&
+    context.detailResult === undefined &&
+    !context.cae &&
+    context.base.errors.length > 0 &&
+    context.base.errors.every((issue) => issue.category === "business")
+  );
+}
+
+function hasWsfeCaeContradiction(context: WsfeAuthorizationContext) {
+  return (
+    (context.resultCode === "A" || context.resultCode === "R") &&
+    Boolean(context.cae)
+  );
+}
+
+function createWsfeStructuredIndeterminate(
+  context: WsfeAuthorizationContext,
+  reason: ArcaAuthorizationIndeterminateReason
+): WsfeAuthorizationOutcome {
+  const outcome: WsfeAuthorizationOutcome = {
+    ...context.base,
+    kind: "indeterminate",
+    reason,
+  };
+  assignWsfeValue(outcome, "result", context.resultCode);
+  assignWsfeValue(outcome, "resultLevel", context.resultLevel);
+  assignWsfeValue(outcome, "cae", context.cae);
+  assignWsfeValue(outcome, "caeExpiry", context.caeExpiry);
+  return outcome;
+}
+
+function createWsfeResults(headerResult?: string, detailResult?: string) {
+  const results: { header?: string; detail?: string } = {};
+  assignWsfeValue(results, "header", headerResult);
+  assignWsfeValue(results, "detail", detailResult);
+  return results;
+}
+
+function createWsfeIndeterminateOutcome(
+  error: unknown
+): WsfeAuthorizationOutcome {
+  return {
+    kind: "indeterminate",
+    service: "wsfe",
+    operation: "FECAESolicitar",
+    results: {},
+    reason: getArcaIndeterminateReason(error),
+    errors: [],
+    observations: [],
+  };
+}
+
+function getArcaIndeterminateReason(
+  error: unknown
+): ArcaAuthorizationIndeterminateReason {
+  if (error instanceof ArcaTransportError) {
+    return "transport_error";
+  }
+  if (error instanceof ArcaSoapFaultError) {
+    return "soap_fault";
+  }
+  if (error instanceof ArcaInvalidSoapResponseError) {
+    return "invalid_response";
+  }
+  return "unexpected_error";
+}
+
+function createWsfeOutcomeError(
+  outcome: Exclude<WsfeAuthorizationOutcome, { kind: "authorized" }>
+) {
+  const issues = [...outcome.errors, ...outcome.observations];
+  const firstIssue = issues[0];
+  const message = firstIssue
+    ? formatWsfeIssue(firstIssue)
+    : outcome.kind === "rejected"
+      ? "WSFE rejected the voucher authorization"
+      : outcome.result === "A"
+        ? "WSFE did not return CAE authorization data"
+        : "WSFE did not return conclusive voucher authorization data";
+
+  return new ArcaServiceError(message, {
+    service: "wsfe",
+    operation: outcome.operation,
+    ...(firstIssue?.code === undefined ? {} : { serviceCode: firstIssue.code }),
+    ...(outcome.result === undefined ? {} : { result: outcome.result }),
+    ...(outcome.resultLevel === undefined
+      ? {}
+      : { resultLevel: outcome.resultLevel }),
+    results: outcome.results,
+    ...(outcome.kind === "indeterminate" && outcome.cae
+      ? { cae: outcome.cae }
+      : {}),
+    issues,
+    detail: outcome.raw,
+  });
+}
+
+function createWsfeServiceError(
+  operation: string,
+  result: Record<string, unknown>,
+  issues: ArcaFiscalIssue[]
+) {
+  const firstIssue = issues[0];
+  return new ArcaServiceError(
+    firstIssue ? formatWsfeIssue(firstIssue) : "WSFE returned a service error",
+    {
+      service: "wsfe",
+      operation,
+      ...(firstIssue?.code === undefined
+        ? {}
+        : { serviceCode: firstIssue.code }),
+      issues,
+      detail: result,
+    }
+  );
+}
+
+function extractWsfeGlobalIssues(
+  result: Record<string, unknown>,
+  operation: string,
+  resultLevel?: ArcaFiscalResultLevel
+): ArcaFiscalIssue[] {
+  const errorsContainer = toWsfeRecord(result.Errors);
+  return normalizeWsfeIssueEntries(errorsContainer?.Err).map((entry) => ({
+    service: "wsfe",
+    operation,
+    source: "error",
+    category:
+      operation === "FECAESolicitar" &&
+      WSFE_AUTHORIZATION_INFRASTRUCTURE_CODES.has(entry.code ?? "")
+        ? "infrastructure"
+        : operation === "FECAESolicitar"
+          ? "business"
+          : "unknown",
+    ...(entry.code === undefined ? {} : { code: entry.code }),
+    message: entry.message,
+    ...(resultLevel === undefined ? {} : { resultLevel }),
+  }));
+}
+
+function extractWsfeObservations(
+  detail: Record<string, unknown>,
+  category: ArcaFiscalIssue["category"]
+): ArcaFiscalIssue[] {
+  const observationsContainer = toWsfeRecord(detail.Observaciones);
+  return normalizeWsfeIssueEntries(observationsContainer?.Obs).map((entry) => ({
+    service: "wsfe",
+    operation: "FECAESolicitar",
+    source: "observation",
+    category,
+    ...(entry.code === undefined ? {} : { code: entry.code }),
+    message: entry.message,
+    resultLevel: "detail",
+  }));
+}
+
+function normalizeWsfeIssueEntries(rawErrors: unknown) {
   const entries = Array.isArray(rawErrors)
     ? rawErrors
     : rawErrors
@@ -1050,14 +1499,66 @@ function normalizeWsfeErrors(rawErrors: unknown) {
   return entries
     .map((entry) => entry as Record<string, unknown>)
     .map((entry) => {
-      const code = entry.Code ?? entry.code ?? "N/A";
+      const code = entry.Code ?? entry.code;
       const message = entry.Msg ?? entry.msg ?? "Unknown WSFE error";
       return {
-        code: String(code),
-        message: `(${String(code)}) ${String(message)}`,
+        ...(code === undefined ? {} : { code: String(code) }),
+        message: String(message),
       };
     });
 }
+
+function formatWsfeIssue(issue: ArcaFiscalIssue) {
+  return issue.code ? `(${issue.code}) ${issue.message}` : issue.message;
+}
+
+function normalizeWsfeResult(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toUpperCase();
+  return normalized || undefined;
+}
+
+function normalizeWsfeString(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const normalized = String(value).trim();
+  return normalized || undefined;
+}
+
+function normalizeWsfeNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : undefined;
+}
+
+function assignWsfeValue<TTarget, TKey extends keyof TTarget>(
+  target: TTarget,
+  key: TKey,
+  value: TTarget[TKey] | undefined
+) {
+  if (value !== undefined) {
+    target[key] = value;
+  }
+}
+
+function toWsfeRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+const WSFE_AUTHORIZATION_INFRASTRUCTURE_CODES = new Set([
+  "500",
+  "501",
+  "502",
+  "600",
+  "601",
+]);
 
 function getWsfeResultEntries(
   result: Record<string, unknown>,

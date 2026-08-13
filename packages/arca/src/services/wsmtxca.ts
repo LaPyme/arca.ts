@@ -1,7 +1,25 @@
-import { ArcaServiceError } from "../errors";
+import {
+  ArcaInvalidSoapResponseError,
+  ArcaServiceError,
+  ArcaSoapFaultError,
+  ArcaTransportError,
+} from "../errors";
 import type { ArcaClientConfig, ArcaRepresentedTaxId } from "../internal/types";
 import type { SoapTransport } from "../soap";
 import type { WsaaAuthModule } from "../wsaa";
+import type {
+  ArcaAuthorizationIndeterminateReason,
+  ArcaAuthorizationOutcome,
+  ArcaFiscalIssue,
+  ArcaVoucherLookupResult,
+} from "./fiscal-evidence";
+
+/** Input data for one WSMTXCA voucher authorization. */
+export type WsmtxcaAuthorizeVoucherInput = {
+  representedTaxId?: ArcaRepresentedTaxId;
+  data: Record<string, unknown>;
+  forceRefresh?: boolean;
+};
 
 /** Result of a successful WSMTXCA voucher authorization. */
 export type WsmtxcaAuthorizationResult = {
@@ -12,11 +30,57 @@ export type WsmtxcaAuthorizationResult = {
   raw: Record<string, unknown>;
 };
 
+/** Structured evidence from one exact WSMTXCA authorization attempt. */
+export type WsmtxcaAuthorizationOutcome = ArcaAuthorizationOutcome<"wsmtxca">;
+
 /** Result of querying the last authorized voucher number. */
 export type WsmtxcaLastAuthorizedVoucherResult = {
   voucherNumber: number;
   raw: Record<string, unknown>;
 };
+
+/** A point of sale enabled for WSMTXCA. */
+export type WsmtxcaSalesPoint = {
+  number: number;
+  blocked: boolean;
+  deletedAt?: string;
+};
+
+/** Result of querying WSMTXCA points of sale. */
+export type WsmtxcaSalesPointsResult = {
+  salesPoints: WsmtxcaSalesPoint[];
+  raw: Record<string, unknown>;
+};
+
+/** Typed provider fields used to match one exact WSMTXCA voucher. */
+export type WsmtxcaVoucherInfo = {
+  voucherNumber?: number;
+  invoiceDate?: string;
+  salesPoint?: number;
+  voucherType?: number;
+  concept?: number;
+  documentType?: number;
+  documentNumber?: string;
+  receiverVatConditionId?: number;
+  totalAmount?: number;
+  subtotalAmount?: number;
+  taxableAmount?: number;
+  nonTaxableAmount?: number;
+  exemptAmount?: number;
+  taxAmount?: number;
+  vatAmount?: number;
+  currencyId?: string;
+  exchangeRate?: number;
+  cae?: string;
+  caeExpiry?: string;
+  raw: Record<string, unknown>;
+};
+
+/** Typed exact-voucher consultation result for WSMTXCA. */
+export type WsmtxcaVoucherLookupOutcome = ArcaVoucherLookupResult<
+  WsmtxcaVoucherInfo,
+  "wsmtxca"
+>;
 
 /** Result of looking up a specific WSMTXCA voucher. */
 export type WsmtxcaVoucherLookupResult = {
@@ -28,12 +92,14 @@ export type WsmtxcaVoucherLookupResult = {
 
 /** WSMTXCA electronic invoicing service (Factura de Crédito Electrónica). */
 export type WsmtxcaService = {
+  /** Attempts one authorization without transport retries and returns provider evidence. */
+  authorizeVoucherOutcome(
+    input: WsmtxcaAuthorizeVoucherInput
+  ): Promise<WsmtxcaAuthorizationOutcome>;
   /** Authorizes a voucher and returns the CAE. */
-  authorizeVoucher(input: {
-    representedTaxId?: ArcaRepresentedTaxId;
-    data: Record<string, unknown>;
-    forceRefresh?: boolean;
-  }): Promise<WsmtxcaAuthorizationResult>;
+  authorizeVoucher(
+    input: WsmtxcaAuthorizeVoucherInput
+  ): Promise<WsmtxcaAuthorizationResult>;
   /** Returns the last authorized voucher number for the given sales point and type. */
   getLastAuthorizedVoucher(input: {
     representedTaxId?: ArcaRepresentedTaxId;
@@ -41,6 +107,19 @@ export type WsmtxcaService = {
     salesPoint: number;
     forceRefresh?: boolean;
   }): Promise<WsmtxcaLastAuthorizedVoucherResult>;
+  /** Returns the points of sale enabled for WSMTXCA. */
+  getSalesPoints(input: {
+    representedTaxId?: ArcaRepresentedTaxId;
+    forceRefresh?: boolean;
+  }): Promise<WsmtxcaSalesPointsResult>;
+  /** Consults one exact voucher and normalizes WSMTXCA error 1503 to `not_found`. */
+  lookupVoucher(input: {
+    representedTaxId?: ArcaRepresentedTaxId;
+    voucherType: number;
+    salesPoint: number;
+    voucherNumber: number;
+    forceRefresh?: boolean;
+  }): Promise<WsmtxcaVoucherLookupOutcome>;
   /** Retrieves details for a specific voucher. */
   getVoucher(input: {
     representedTaxId?: ArcaRepresentedTaxId;
@@ -61,168 +140,285 @@ export type CreateWsmtxcaServiceOptions = {
 export function createWsmtxcaService(
   options: CreateWsmtxcaServiceOptions
 ): WsmtxcaService {
+  async function executeWsmtxcaAuthenticatedOperation(
+    operation: WsmtxcaOperation,
+    input: {
+      representedTaxId?: ArcaRepresentedTaxId;
+      forceRefresh?: boolean;
+    },
+    body: Record<string, unknown> = {},
+    retries?: number
+  ) {
+    const auth = await options.auth.login("wsmtxca", {
+      representedTaxId: input.representedTaxId,
+      forceRefresh: input.forceRefresh,
+    });
+    const response = await options.soap.execute<
+      Record<string, unknown>,
+      Record<string, unknown>
+    >({
+      service: "wsmtxca",
+      operation,
+      ...(retries === undefined ? {} : { retries }),
+      bodyElementName: `${operation}Request`,
+      bodyElementNamespaceMode: "prefix",
+      body: {
+        authRequest: createWsmtxcaAuth(
+          input.representedTaxId ?? options.config.taxId,
+          auth.token,
+          auth.sign
+        ),
+        ...body,
+      },
+    });
+
+    return unwrapWsmtxcaOperationResponse(response.result, operation);
+  }
+
+  async function executeWsmtxcaAuthorization({
+    representedTaxId,
+    data,
+    forceRefresh,
+  }: WsmtxcaAuthorizeVoucherInput): Promise<{
+    outcome: WsmtxcaAuthorizationOutcome;
+    error?: unknown;
+  }> {
+    try {
+      const raw = await executeWsmtxcaAuthenticatedOperation(
+        "autorizarComprobante",
+        { representedTaxId, forceRefresh },
+        data,
+        0
+      );
+      return { outcome: classifyWsmtxcaAuthorization(raw) };
+    } catch (error) {
+      return {
+        outcome: createWsmtxcaIndeterminateOutcome(error),
+        error,
+      };
+    }
+  }
+
+  async function authorizeVoucherOutcome(
+    input: WsmtxcaAuthorizeVoucherInput
+  ): Promise<WsmtxcaAuthorizationOutcome> {
+    return (await executeWsmtxcaAuthorization(input)).outcome;
+  }
+
+  async function authorizeVoucher(
+    input: WsmtxcaAuthorizeVoucherInput
+  ): Promise<WsmtxcaAuthorizationResult> {
+    const execution = await executeWsmtxcaAuthorization(input);
+    if (execution.error) {
+      throw execution.error;
+    }
+    if (execution.outcome.kind !== "authorized") {
+      throw createWsmtxcaOutcomeError(execution.outcome);
+    }
+
+    const { outcome } = execution;
+    return {
+      cae: outcome.cae,
+      ...(outcome.caeExpiry === undefined
+        ? {}
+        : { caeExpiry: outcome.caeExpiry }),
+      voucherNumber: outcome.voucherNumber,
+      messages: formatWsmtxcaIssues([
+        ...outcome.errors,
+        ...outcome.observations,
+      ]),
+      raw: outcome.raw ?? {},
+    };
+  }
+
+  async function getLastAuthorizedVoucher({
+    representedTaxId,
+    voucherType,
+    salesPoint,
+    forceRefresh,
+  }: {
+    representedTaxId?: ArcaRepresentedTaxId;
+    voucherType: number;
+    salesPoint: number;
+    forceRefresh?: boolean;
+  }): Promise<WsmtxcaLastAuthorizedVoucherResult> {
+    const operation = "consultarUltimoComprobanteAutorizado";
+    const raw = await executeWsmtxcaAuthenticatedOperation(
+      operation,
+      { representedTaxId, forceRefresh },
+      {
+        consultaUltimoComprobanteAutorizadoRequest: {
+          codigoTipoComprobante: voucherType,
+          numeroPuntoVenta: salesPoint,
+        },
+      }
+    );
+    const errors = extractWsmtxcaIssues(raw, operation, "error");
+
+    if (errors.length > 0 && errors.every((issue) => issue.code === "1502")) {
+      return { voucherNumber: 0, raw };
+    }
+    if (errors.length > 0) {
+      throw createWsmtxcaServiceError(operation, raw, errors);
+    }
+
+    return {
+      voucherNumber: parseWsmtxcaVoucherNumber(
+        raw.numeroComprobante ?? raw.cbteNro ?? raw.nroComprobante,
+        "WSMTXCA did not return the last authorized voucher number",
+        raw,
+        true
+      ),
+      raw,
+    };
+  }
+
+  async function getSalesPoints({
+    representedTaxId,
+    forceRefresh,
+  }: {
+    representedTaxId?: ArcaRepresentedTaxId;
+    forceRefresh?: boolean;
+  }): Promise<WsmtxcaSalesPointsResult> {
+    const raw = await executeWsmtxcaAuthenticatedOperation(
+      "consultarPuntosVenta",
+      { representedTaxId, forceRefresh }
+    );
+    const rawSalesPoints = toRecord(raw.arrayPuntosVenta)?.puntoVenta;
+    const entries = Array.isArray(rawSalesPoints)
+      ? rawSalesPoints
+      : rawSalesPoints
+        ? [rawSalesPoints]
+        : [];
+    const salesPoints = entries.flatMap((entry) => {
+      const record = toRecord(entry);
+      const number = parseOptionalPositiveInteger(record?.numeroPuntoVenta);
+      if (number === undefined) {
+        return [];
+      }
+      const deletedAt = normalizeWsmtxcaResponseDate(record?.fechaBaja);
+      return [
+        {
+          number,
+          blocked: String(record?.bloqueado ?? "N").toUpperCase() === "S",
+          ...(deletedAt === undefined ? {} : { deletedAt }),
+        },
+      ];
+    });
+
+    return { salesPoints, raw };
+  }
+
+  async function lookupVoucher({
+    representedTaxId,
+    voucherType,
+    salesPoint,
+    voucherNumber,
+    forceRefresh,
+  }: {
+    representedTaxId?: ArcaRepresentedTaxId;
+    voucherType: number;
+    salesPoint: number;
+    voucherNumber: number;
+    forceRefresh?: boolean;
+  }): Promise<WsmtxcaVoucherLookupOutcome> {
+    const operation = "consultarComprobante";
+    const raw = await executeWsmtxcaAuthenticatedOperation(
+      operation,
+      { representedTaxId, forceRefresh },
+      {
+        consultaComprobanteRequest: {
+          codigoTipoComprobante: voucherType,
+          numeroPuntoVenta: salesPoint,
+          numeroComprobante: voucherNumber,
+        },
+      }
+    );
+    const errors = extractWsmtxcaIssues(raw, operation, "error");
+    const observations = extractWsmtxcaIssues(raw, operation, "observation");
+
+    if (errors.length > 0 && errors.every((issue) => issue.code === "1503")) {
+      return {
+        kind: "not_found",
+        service: "wsmtxca",
+        operation,
+        errors,
+        observations,
+        raw,
+      };
+    }
+    if (errors.length > 0) {
+      throw createWsmtxcaServiceError(operation, raw, errors);
+    }
+
+    const voucher = extractWsmtxcaVoucherPayload(raw);
+    if (voucher === raw && !toRecord(raw.comprobante)) {
+      throw new ArcaServiceError(
+        "WSMTXCA did not return the voucher issue date",
+        {
+          service: "wsmtxca",
+          operation,
+          issues: observations,
+          detail: raw,
+        }
+      );
+    }
+
+    return {
+      kind: "found",
+      service: "wsmtxca",
+      operation,
+      voucher: mapWsmtxcaVoucherInfo(voucher),
+      observations,
+      raw,
+    };
+  }
+
+  async function getVoucher(input: {
+    representedTaxId?: ArcaRepresentedTaxId;
+    voucherType: number;
+    salesPoint: number;
+    voucherNumber: number;
+    forceRefresh?: boolean;
+  }): Promise<WsmtxcaVoucherLookupResult> {
+    const lookup = await lookupVoucher(input);
+    if (lookup.kind === "not_found") {
+      throw createWsmtxcaServiceError(
+        lookup.operation,
+        lookup.raw,
+        lookup.errors
+      );
+    }
+
+    const invoiceDate = lookup.voucher.invoiceDate;
+    if (!invoiceDate) {
+      throw new ArcaServiceError(
+        formatWsmtxcaIssues(lookup.observations)[0] ??
+          "WSMTXCA did not return the voucher issue date",
+        {
+          service: "wsmtxca",
+          operation: lookup.operation,
+          issues: lookup.observations,
+          detail: lookup.raw,
+        }
+      );
+    }
+
+    return {
+      invoiceDate,
+      voucher: lookup.voucher.raw,
+      messages: formatWsmtxcaIssues(lookup.observations),
+      raw: lookup.raw,
+    };
+  }
+
   return {
-    async authorizeVoucher({ representedTaxId, data, forceRefresh }) {
-      const auth = await options.auth.login("wsmtxca", {
-        representedTaxId,
-        forceRefresh,
-      });
-      const response = await options.soap.execute<
-        Record<string, unknown>,
-        Record<string, unknown>
-      >({
-        service: "wsmtxca",
-        operation: "autorizarComprobante",
-        bodyElementName: "autorizarComprobanteRequest",
-        bodyElementNamespaceMode: "prefix",
-        body: {
-          authRequest: createWsmtxcaAuth(
-            representedTaxId ?? options.config.taxId,
-            auth.token,
-            auth.sign
-          ),
-          ...(data as Record<string, unknown>),
-        },
-      });
-
-      const raw = unwrapWsmtxcaOperationResponse(
-        response.result,
-        "autorizarComprobante"
-      );
-      const authorizationPayload = extractWsmtxcaAuthorizationPayload(raw);
-      const messages = extractWsmtxcaMessages(raw);
-      const resultado = raw.resultado ?? authorizationPayload.resultado;
-
-      const caeValue =
-        authorizationPayload.CAE ??
-        authorizationPayload.codigoAutorizacion ??
-        raw.codigoAutorizacion;
-
-      if (resultado === "R" || caeValue == null) {
-        throw new ArcaServiceError(
-          messages.join(" | ") || "WSMTXCA rejected the voucher authorization",
-          { detail: raw }
-        );
-      }
-
-      return {
-        cae: String(caeValue),
-        caeExpiry: normalizeWsmtxcaResponseDate(
-          authorizationPayload.fechaVencimientoCAE ??
-            authorizationPayload.fechaVencimiento ??
-            raw.fechaVencimiento
-        ),
-        voucherNumber: parseWsmtxcaVoucherNumber(
-          authorizationPayload.numeroComprobante ?? raw.numeroComprobante,
-          "WSMTXCA did not return the authorized voucher number",
-          raw
-        ),
-        messages,
-        raw,
-      };
-    },
-    async getLastAuthorizedVoucher({
-      representedTaxId,
-      voucherType,
-      salesPoint,
-      forceRefresh,
-    }) {
-      const auth = await options.auth.login("wsmtxca", {
-        representedTaxId,
-        forceRefresh,
-      });
-      const response = await options.soap.execute<
-        Record<string, unknown>,
-        Record<string, unknown>
-      >({
-        service: "wsmtxca",
-        operation: "consultarUltimoComprobanteAutorizado",
-        bodyElementName: "consultarUltimoComprobanteAutorizadoRequest",
-        bodyElementNamespaceMode: "prefix",
-        body: {
-          authRequest: createWsmtxcaAuth(
-            representedTaxId ?? options.config.taxId,
-            auth.token,
-            auth.sign
-          ),
-          consultaUltimoComprobanteAutorizadoRequest: {
-            codigoTipoComprobante: voucherType,
-            numeroPuntoVenta: salesPoint,
-          },
-        },
-      });
-
-      const raw = unwrapWsmtxcaOperationResponse(
-        response.result,
-        "consultarUltimoComprobanteAutorizado"
-      );
-      return {
-        voucherNumber: parseWsmtxcaVoucherNumber(
-          raw.numeroComprobante ?? raw.cbteNro ?? raw.nroComprobante,
-          extractWsmtxcaMessages(raw).join(" | ") ||
-            "WSMTXCA did not return the last authorized voucher number",
-          raw
-        ),
-        raw,
-      };
-    },
-    async getVoucher({
-      representedTaxId,
-      voucherType,
-      salesPoint,
-      voucherNumber,
-      forceRefresh,
-    }) {
-      const auth = await options.auth.login("wsmtxca", {
-        representedTaxId,
-        forceRefresh,
-      });
-      const response = await options.soap.execute<
-        Record<string, unknown>,
-        Record<string, unknown>
-      >({
-        service: "wsmtxca",
-        operation: "consultarComprobante",
-        bodyElementName: "consultarComprobanteRequest",
-        bodyElementNamespaceMode: "prefix",
-        body: {
-          authRequest: createWsmtxcaAuth(
-            representedTaxId ?? options.config.taxId,
-            auth.token,
-            auth.sign
-          ),
-          consultaComprobanteRequest: {
-            codigoTipoComprobante: voucherType,
-            numeroPuntoVenta: salesPoint,
-            numeroComprobante: voucherNumber,
-          },
-        },
-      });
-
-      const raw = unwrapWsmtxcaOperationResponse(
-        response.result,
-        "consultarComprobante"
-      );
-      const voucher = extractWsmtxcaVoucherPayload(raw);
-      const messages = extractWsmtxcaMessages(raw);
-      const invoiceDate = normalizeWsmtxcaResponseDate(
-        voucher.fechaEmision ?? voucher.fecha ?? voucher.CbteFch
-      );
-
-      if (!invoiceDate) {
-        throw new ArcaServiceError(
-          messages[0] ?? "WSMTXCA did not return the voucher issue date",
-          { detail: raw }
-        );
-      }
-
-      return {
-        invoiceDate,
-        voucher,
-        messages,
-        raw,
-      };
-    },
+    authorizeVoucherOutcome,
+    authorizeVoucher,
+    getLastAuthorizedVoucher,
+    getSalesPoints,
+    lookupVoucher,
+    getVoucher,
   };
 }
 
@@ -239,17 +435,20 @@ function createWsmtxcaAuth(
 }
 
 function toRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object"
+  return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
 }
 
+type WsmtxcaOperation =
+  | "autorizarComprobante"
+  | "consultarUltimoComprobanteAutorizado"
+  | "consultarPuntosVenta"
+  | "consultarComprobante";
+
 function unwrapWsmtxcaOperationResponse(
   response: unknown,
-  operation:
-    | "autorizarComprobante"
-    | "consultarUltimoComprobanteAutorizado"
-    | "consultarComprobante"
+  operation: WsmtxcaOperation
 ) {
   const responseRecord = toRecord(response) ?? {};
 
@@ -268,6 +467,14 @@ function unwrapWsmtxcaOperationResponse(
       toRecord(responseRecord.consultarComprobanteResponse) ??
       toRecord(responseRecord.consultaComprobanteResponse) ??
       toRecord(responseRecord.consultarComprobanteResult) ??
+      responseRecord
+    );
+  }
+
+  if (operation === "consultarPuntosVenta") {
+    return (
+      toRecord(responseRecord.consultarPuntosVentaResponse) ??
+      toRecord(responseRecord.consultarPuntosVentaResult) ??
       responseRecord
     );
   }
@@ -298,60 +505,379 @@ function extractWsmtxcaVoucherPayload(raw: Record<string, unknown>) {
   );
 }
 
-function extractWsmtxcaMessages(raw: Record<string, unknown>): string[] {
-  const rawErrors = raw.arrayErrores as
-    | { codigoDescripcion?: unknown }
-    | undefined;
-  const rawObservations = raw.arrayObservaciones as
-    | { codigoDescripcion?: unknown }
-    | undefined;
-
-  const toEntries = (
-    value: unknown
-  ): Array<{ codigo?: unknown; descripcion?: unknown }> => {
-    if (!value) {
-      return [];
-    }
-    if (Array.isArray(value)) {
-      return value as Array<{ codigo?: unknown; descripcion?: unknown }>;
-    }
-    if (typeof value === "object") {
-      return [value as { codigo?: unknown; descripcion?: unknown }];
-    }
-    return [];
+function classifyWsmtxcaAuthorization(
+  raw: Record<string, unknown>
+): WsmtxcaAuthorizationOutcome {
+  const operation = "autorizarComprobante";
+  const payload = extractWsmtxcaAuthorizationPayload(raw);
+  const result = normalizeWsmtxcaResult(raw.resultado ?? payload.resultado);
+  const cae = normalizeWsmtxcaString(
+    payload.CAE ?? payload.codigoAutorizacion ?? raw.codigoAutorizacion
+  );
+  const caeExpiry = normalizeWsmtxcaResponseDate(
+    payload.fechaVencimientoCAE ??
+      payload.fechaVencimiento ??
+      raw.fechaVencimiento
+  );
+  const voucherNumber = parseOptionalPositiveInteger(
+    payload.numeroComprobante ?? raw.numeroComprobante
+  );
+  const errors = extractWsmtxcaIssues(raw, operation, "error");
+  const observations = extractWsmtxcaIssues(raw, operation, "observation");
+  const base = {
+    service: "wsmtxca" as const,
+    operation,
+    results: createWsmtxcaResults(result),
+    errors,
+    observations,
+    raw,
   };
 
-  const errors = toEntries(rawErrors?.codigoDescripcion).map((entry) => {
-    const code = entry.codigo == null ? "N/A" : String(entry.codigo);
-    const description =
-      entry.descripcion == null
-        ? "Unknown WSMTXCA error"
-        : String(entry.descripcion);
-    return `Error ${code}: ${description}`;
-  });
+  if (
+    (result === "A" || result === "O") &&
+    cae &&
+    voucherNumber !== undefined &&
+    errors.length === 0
+  ) {
+    return {
+      ...base,
+      kind: "authorized",
+      result,
+      resultLevel: "operation",
+      cae,
+      ...(caeExpiry === undefined ? {} : { caeExpiry }),
+      voucherNumber,
+    };
+  }
 
-  const observations = toEntries(rawObservations?.codigoDescripcion).map(
-    (entry) => {
-      const code = entry.codigo == null ? "N/A" : String(entry.codigo);
-      const description =
-        entry.descripcion == null ? "" : String(entry.descripcion);
-      return `Obs ${code}: ${description}`.trim();
+  if (result === "R" && !cae && errors.length > 0) {
+    return {
+      ...base,
+      kind: "rejected",
+      result: "R",
+      resultLevel: "operation",
+    };
+  }
+
+  const outcome: WsmtxcaAuthorizationOutcome = {
+    ...base,
+    kind: "indeterminate",
+    reason:
+      (result === "R" && Boolean(cae)) ||
+      ((result === "A" || result === "O") && Boolean(errors.length))
+        ? "contradictory_response"
+        : "incomplete_response",
+    ...(result === undefined ? {} : { result }),
+    ...(result === undefined ? {} : { resultLevel: "operation" }),
+  };
+  assignWsmtxcaValue(outcome, "cae", cae);
+  assignWsmtxcaValue(outcome, "caeExpiry", caeExpiry);
+  assignWsmtxcaValue(outcome, "voucherNumber", voucherNumber);
+  return outcome;
+}
+
+function createWsmtxcaIndeterminateOutcome(
+  error: unknown
+): WsmtxcaAuthorizationOutcome {
+  return {
+    kind: "indeterminate",
+    service: "wsmtxca",
+    operation: "autorizarComprobante",
+    results: {},
+    reason: getWsmtxcaIndeterminateReason(error),
+    errors: [],
+    observations: [],
+  };
+}
+
+function getWsmtxcaIndeterminateReason(
+  error: unknown
+): ArcaAuthorizationIndeterminateReason {
+  if (error instanceof ArcaTransportError) {
+    return "transport_error";
+  }
+  if (error instanceof ArcaSoapFaultError) {
+    return "soap_fault";
+  }
+  if (error instanceof ArcaInvalidSoapResponseError) {
+    return "invalid_response";
+  }
+  return "unexpected_error";
+}
+
+function createWsmtxcaOutcomeError(
+  outcome: Exclude<WsmtxcaAuthorizationOutcome, { kind: "authorized" }>
+) {
+  const issues = [...outcome.errors, ...outcome.observations];
+  const messages = formatWsmtxcaIssues(issues);
+  const firstIssue = issues[0];
+  return new ArcaServiceError(
+    messages.join(" | ") ||
+      (outcome.kind === "rejected"
+        ? "WSMTXCA rejected the voucher authorization"
+        : "WSMTXCA did not return conclusive voucher authorization data"),
+    {
+      service: "wsmtxca",
+      operation: outcome.operation,
+      ...(firstIssue?.code === undefined
+        ? {}
+        : { serviceCode: firstIssue.code }),
+      ...(outcome.result === undefined ? {} : { result: outcome.result }),
+      ...(outcome.resultLevel === undefined
+        ? {}
+        : { resultLevel: outcome.resultLevel }),
+      results: outcome.results,
+      ...(outcome.kind === "indeterminate" && outcome.cae
+        ? { cae: outcome.cae }
+        : {}),
+      issues,
+      detail: outcome.raw,
     }
   );
+}
 
-  return [...errors, ...observations];
+function createWsmtxcaResults(operationResult?: string) {
+  const results: { operation?: string } = {};
+  assignWsmtxcaValue(results, "operation", operationResult);
+  return results;
+}
+
+function createWsmtxcaServiceError(
+  operation: string,
+  raw: Record<string, unknown>,
+  issues: ArcaFiscalIssue[]
+) {
+  const firstIssue = issues[0];
+  return new ArcaServiceError(
+    formatWsmtxcaIssues(issues).join(" | ") ||
+      "WSMTXCA returned a service error",
+    {
+      service: "wsmtxca",
+      operation,
+      ...(firstIssue?.code === undefined
+        ? {}
+        : { serviceCode: firstIssue.code }),
+      issues,
+      detail: raw,
+    }
+  );
+}
+
+function extractWsmtxcaIssues(
+  raw: Record<string, unknown>,
+  operation: string,
+  source: "error" | "observation"
+): ArcaFiscalIssue[] {
+  const container = toRecord(
+    source === "error" ? raw.arrayErrores : raw.arrayObservaciones
+  );
+  return normalizeWsmtxcaIssueEntries(container?.codigoDescripcion).map(
+    (entry) => ({
+      service: "wsmtxca",
+      operation,
+      source,
+      category:
+        source === "observation"
+          ? "observation"
+          : operation === "autorizarComprobante"
+            ? "business"
+            : "unknown",
+      ...(entry.code === undefined ? {} : { code: entry.code }),
+      message: entry.message,
+      ...(operation === "autorizarComprobante"
+        ? { resultLevel: "operation" as const }
+        : {}),
+    })
+  );
+}
+
+function normalizeWsmtxcaIssueEntries(value: unknown) {
+  const entries = Array.isArray(value) ? value : value ? [value] : [];
+  return entries.map((entry) => {
+    const record = toRecord(entry) ?? {};
+    const code = record.codigo;
+    const description = record.descripcion;
+    return {
+      ...(code === undefined || code === null ? {} : { code: String(code) }),
+      message:
+        description === undefined || description === null
+          ? "Unknown WSMTXCA issue"
+          : String(description),
+    };
+  });
+}
+
+function formatWsmtxcaIssues(issues: ArcaFiscalIssue[]): string[] {
+  return issues.map((issue) => {
+    const prefix = issue.source === "error" ? "Error" : "Obs";
+    return `${prefix}${issue.code ? ` ${issue.code}` : ""}: ${issue.message}`;
+  });
+}
+
+function mapWsmtxcaVoucherInfo(
+  raw: Record<string, unknown>
+): WsmtxcaVoucherInfo {
+  const voucher: WsmtxcaVoucherInfo = { raw };
+  const invoiceDate = normalizeWsmtxcaResponseDate(
+    raw.fechaEmision ?? raw.fecha ?? raw.CbteFch
+  );
+  const cae = normalizeWsmtxcaString(raw.codigoAutorizacion ?? raw.CAE);
+  const caeExpiry = normalizeWsmtxcaResponseDate(
+    raw.fechaVencimiento ?? raw.fechaVencimientoCAE
+  );
+  const vatAmount = sumWsmtxcaVatAmounts(raw.arraySubtotalesIVA);
+
+  assignWsmtxcaValue(
+    voucher,
+    "voucherNumber",
+    parseOptionalPositiveInteger(raw.numeroComprobante)
+  );
+  assignWsmtxcaValue(voucher, "invoiceDate", invoiceDate);
+  assignWsmtxcaValue(
+    voucher,
+    "salesPoint",
+    parseOptionalPositiveInteger(raw.numeroPuntoVenta)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "voucherType",
+    parseOptionalPositiveInteger(raw.codigoTipoComprobante)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "concept",
+    parseOptionalNumber(raw.codigoConcepto)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "documentType",
+    parseOptionalNumber(raw.codigoTipoDocumento)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "documentNumber",
+    normalizeWsmtxcaString(raw.numeroDocumento)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "receiverVatConditionId",
+    parseOptionalNumber(raw.condicionIVAReceptor)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "totalAmount",
+    parseOptionalNumber(raw.importeTotal)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "subtotalAmount",
+    parseOptionalNumber(raw.importeSubtotal)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "taxableAmount",
+    parseOptionalNumber(raw.importeGravado)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "nonTaxableAmount",
+    parseOptionalNumber(raw.importeNoGravado)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "exemptAmount",
+    parseOptionalNumber(raw.importeExento)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "taxAmount",
+    parseOptionalNumber(raw.importeOtrosTributos)
+  );
+  assignWsmtxcaValue(voucher, "vatAmount", vatAmount);
+  assignWsmtxcaValue(
+    voucher,
+    "currencyId",
+    normalizeWsmtxcaString(raw.codigoMoneda)
+  );
+  assignWsmtxcaValue(
+    voucher,
+    "exchangeRate",
+    parseOptionalNumber(raw.cotizacionMoneda)
+  );
+  assignWsmtxcaValue(voucher, "cae", cae);
+  assignWsmtxcaValue(voucher, "caeExpiry", caeExpiry);
+
+  return voucher;
+}
+
+function sumWsmtxcaVatAmounts(value: unknown): number | undefined {
+  const subtotals = toRecord(value)?.subtotalIVA;
+  const entries = Array.isArray(subtotals)
+    ? subtotals
+    : subtotals
+      ? [subtotals]
+      : [];
+  const amounts = entries
+    .map((entry) => parseOptionalNumber(toRecord(entry)?.importe))
+    .filter((amount): amount is number => amount !== undefined);
+  return amounts.length > 0
+    ? amounts.reduce((total, amount) => total + amount, 0)
+    : undefined;
 }
 
 function parseWsmtxcaVoucherNumber(
   value: unknown,
   message: string,
-  detail: Record<string, unknown>
+  detail: Record<string, unknown>,
+  allowZero = false
 ) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new ArcaServiceError(message, { detail });
+  if (!Number.isFinite(parsed) || (allowZero ? parsed < 0 : parsed <= 0)) {
+    throw new ArcaServiceError(message, {
+      service: "wsmtxca",
+      detail,
+    });
   }
   return parsed;
+}
+
+function parseOptionalPositiveInteger(value: unknown): number | undefined {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parseOptionalNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeWsmtxcaResult(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toUpperCase();
+  return normalized || undefined;
+}
+
+function normalizeWsmtxcaString(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const normalized = String(value).trim();
+  return normalized || undefined;
+}
+
+function assignWsmtxcaValue<TTarget, TKey extends keyof TTarget>(
+  target: TTarget,
+  key: TKey,
+  value: TTarget[TKey] | undefined
+) {
+  if (value !== undefined) {
+    target[key] = value;
+  }
 }
 
 function normalizeWsmtxcaResponseDate(value: unknown): string | undefined {

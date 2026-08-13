@@ -99,6 +99,35 @@ describe("createSoapTransport", () => {
     expect(mockPostXml.mock.calls[0]?.[0]?.body).toContain("<loginCms ");
   });
 
+  it("allows fiscal operations to disable configured transport retries", async () => {
+    mockPostXml.mockResolvedValueOnce({
+      body: '<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><FECAESolicitarResponse><FECAESolicitarResult /></FECAESolicitarResponse></soap12:Body></soap12:Envelope>',
+      statusCode: 200,
+      contentType: "application/soap+xml; charset=utf-8",
+    });
+
+    const transport = createSoapTransport({
+      config: {
+        taxId: "20123456789",
+        certificatePem: "cert",
+        privateKeyPem: "key",
+        environment: "test",
+        retries: 3,
+      },
+    });
+
+    await transport.execute({
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      retries: 0,
+      body: {},
+    });
+
+    expect(mockPostXml).toHaveBeenCalledWith(
+      expect.objectContaining({ retries: 0 })
+    );
+  });
+
   it("throws invalid SOAP response errors with HTTP metadata and sanitized previews", async () => {
     mockPostXml.mockResolvedValueOnce({
       body: "<html><body><Token>secret-token</Token><Sign>secret-sign</Sign></body></html>",

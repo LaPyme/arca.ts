@@ -1,4 +1,9 @@
 import type { ArcaServiceName } from "./internal/types";
+import type {
+  ArcaFiscalIssue,
+  ArcaFiscalResultLevel,
+  ArcaFiscalResults,
+} from "./services/fiscal-evidence";
 
 /** Base error class for all ARCA-related errors. */
 export class ArcaError extends Error {
@@ -118,17 +123,38 @@ export class ArcaInvalidSoapResponseError extends ArcaError {
 export class ArcaServiceError extends ArcaError {
   override readonly name: string = "ArcaServiceError";
   readonly serviceCode?: string | number;
+  readonly service?: ArcaServiceName;
+  readonly operation?: string;
+  readonly result?: string;
+  readonly resultLevel?: ArcaFiscalResultLevel;
+  readonly results?: ArcaFiscalResults;
+  readonly cae?: string;
+  readonly issues?: readonly ArcaFiscalIssue[];
   readonly detail?: unknown;
 
   constructor(
     message: string,
     options?: ErrorOptions & {
       serviceCode?: string | number;
+      service?: ArcaServiceName;
+      operation?: string;
+      result?: string;
+      resultLevel?: ArcaFiscalResultLevel;
+      results?: ArcaFiscalResults;
+      cae?: string;
+      issues?: readonly ArcaFiscalIssue[];
       detail?: unknown;
     }
   ) {
     super(message, "ARCA_SERVICE_ERROR", options);
     this.serviceCode = options?.serviceCode;
+    this.service = options?.service;
+    this.operation = options?.operation;
+    this.result = options?.result;
+    this.resultLevel = options?.resultLevel;
+    this.results = options?.results;
+    this.cae = options?.cae;
+    this.issues = options?.issues;
     this.detail = options?.detail;
   }
 }

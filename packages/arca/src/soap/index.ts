@@ -68,7 +68,7 @@ export function createSoapTransport(
             options.config.environment === "production" &&
             serviceConfig.useLegacyTlsSecurityLevel0 === true,
           timeout: options.config.timeout,
-          retries: options.config.retries,
+          retries: request.retries ?? options.config.retries,
           retryDelay: options.config.retryDelay,
           logger: options.logger,
           service: request.service,
