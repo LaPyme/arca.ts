@@ -6,6 +6,13 @@ import {
   ArcaTransportError,
 } from "../errors";
 import {
+  classifyArcaAuthenticationError,
+  classifyArcaAuthenticationIssues,
+  createArcaAuthenticationErrorFromEvidence,
+  createArcaAuthenticationEvidence,
+  executeWithAuthenticationRecovery,
+} from "../internal/authentication";
+import {
   isWithinArcaTolerance,
   normalizeArcaAmountToMinorUnits,
   serializeArcaAmount,
@@ -410,7 +417,7 @@ export function createWsfeService(
     return unwrapWsfeOperationEnvelope(operation, response.result);
   }
 
-  async function executeWsfeAuthenticatedOperation(
+  function executeWsfeAuthenticatedOperation(
     operation: string,
     input: {
       representedTaxId?: ArcaRepresentedTaxId;
@@ -418,13 +425,20 @@ export function createWsfeService(
     },
     body: Record<string, unknown> = {}
   ) {
-    const result = await executeWsfeAuthenticatedRawOperation(
+    return executeWithAuthenticationRecovery({
+      service: "wsfe",
       operation,
-      input,
-      body
-    );
-    throwForWsfeOperationErrors(operation, result);
-    return result;
+      forceRefresh: input.forceRefresh,
+      async execute(forceRefresh) {
+        const result = await executeWsfeAuthenticatedRawOperation(
+          operation,
+          { representedTaxId: input.representedTaxId, forceRefresh },
+          body
+        );
+        throwForWsfeOperationErrors(operation, result);
+        return result;
+      },
+    });
   }
 
   async function executeWsfeOperation(
@@ -515,7 +529,35 @@ export function createWsfeService(
     }).then(({ outcome }) => outcome);
   }
 
-  async function authorizeNormalizedVoucher({
+  function authorizeNormalizedVoucher({
+    representedTaxId,
+    data: normalizedInput,
+    voucherNumber,
+    forceRefresh,
+    allowAuthenticationRecovery,
+  }: {
+    representedTaxId?: number | string;
+    data: NormalizedWsfeVoucherInput;
+    voucherNumber: number;
+    forceRefresh?: boolean;
+    allowAuthenticationRecovery?: boolean;
+  }): Promise<WsfeAuthorizationResult> {
+    return executeWithAuthenticationRecovery({
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      forceRefresh,
+      allowRetry: allowAuthenticationRecovery,
+      execute: (attemptForceRefresh) =>
+        authorizeNormalizedVoucherOnce({
+          representedTaxId,
+          data: normalizedInput,
+          voucherNumber,
+          forceRefresh: attemptForceRefresh,
+        }),
+    });
+  }
+
+  async function authorizeNormalizedVoucherOnce({
     representedTaxId,
     data: normalizedInput,
     voucherNumber,
@@ -611,7 +653,35 @@ export function createWsfeService(
     }
   }
 
-  async function lookupVoucher({
+  function lookupVoucher({
+    representedTaxId,
+    number,
+    salesPoint,
+    voucherType,
+    forceRefresh,
+  }: {
+    representedTaxId?: number | string;
+    number: number;
+    salesPoint: number;
+    voucherType: number;
+    forceRefresh?: boolean;
+  }): Promise<WsfeVoucherLookupResult> {
+    return executeWithAuthenticationRecovery({
+      service: "wsfe",
+      operation: "FECompConsultar",
+      forceRefresh,
+      execute: (attemptForceRefresh) =>
+        lookupVoucherOnce({
+          representedTaxId,
+          number,
+          salesPoint,
+          voucherType,
+          forceRefresh: attemptForceRefresh,
+        }),
+    });
+  }
+
+  async function lookupVoucherOnce({
     representedTaxId,
     number,
     salesPoint,
@@ -688,6 +758,7 @@ export function createWsfeService(
         representedTaxId,
         data: normalizedInput,
         voucherNumber,
+        allowAuthenticationRecovery: forceRefresh !== true,
       });
     },
     getNextVoucherNumber,
@@ -1514,6 +1585,23 @@ function classifyWsfeAuthorization(
     return createWsfeStructuredIndeterminate(context, "contradictory_response");
   }
 
+  const authenticationError = classifyArcaAuthenticationIssues(errors, {
+    service: "wsfe",
+    operation,
+  });
+  if (
+    authenticationError &&
+    detailResult === undefined &&
+    headerResult !== "A" &&
+    headerResult !== "O" &&
+    !cae
+  ) {
+    return {
+      ...createWsfeStructuredIndeterminate(context, "authentication_rejected"),
+      authentication: createArcaAuthenticationEvidence(authenticationError),
+    };
+  }
+
   if (hasInfrastructureError) {
     return createWsfeStructuredIndeterminate(context, "incomplete_response");
   }
@@ -1629,12 +1717,13 @@ function hasWsfeCaeContradiction(context: WsfeAuthorizationContext) {
 function createWsfeStructuredIndeterminate(
   context: WsfeAuthorizationContext,
   reason: ArcaAuthorizationIndeterminateReason
-): WsfeAuthorizationOutcome {
-  const outcome: WsfeAuthorizationOutcome = {
-    ...context.base,
-    kind: "indeterminate",
-    reason,
-  };
+): Extract<WsfeAuthorizationOutcome, { kind: "indeterminate" }> {
+  const outcome: Extract<WsfeAuthorizationOutcome, { kind: "indeterminate" }> =
+    {
+      ...context.base,
+      kind: "indeterminate",
+      reason,
+    };
   assignWsfeValue(outcome, "result", context.resultCode);
   assignWsfeValue(outcome, "resultLevel", context.resultLevel);
   assignWsfeValue(outcome, "cae", context.cae);
@@ -1652,12 +1741,23 @@ function createWsfeResults(headerResult?: string, detailResult?: string) {
 function createWsfeIndeterminateOutcome(
   error: unknown
 ): WsfeAuthorizationOutcome {
+  const authenticationError = classifyArcaAuthenticationError(error, {
+    service: "wsfe",
+    operation: "FECAESolicitar",
+  });
   return {
     kind: "indeterminate",
     service: "wsfe",
     operation: "FECAESolicitar",
     results: {},
-    reason: getArcaIndeterminateReason(error),
+    reason: authenticationError
+      ? "authentication_rejected"
+      : getArcaIndeterminateReason(error),
+    ...(authenticationError
+      ? {
+          authentication: createArcaAuthenticationEvidence(authenticationError),
+        }
+      : {}),
     errors: [],
     observations: [],
   };
@@ -1681,6 +1781,13 @@ function getArcaIndeterminateReason(
 function createWsfeOutcomeError(
   outcome: Exclude<WsfeAuthorizationOutcome, { kind: "authorized" }>
 ) {
+  if (outcome.kind === "indeterminate" && outcome.authentication) {
+    return createArcaAuthenticationErrorFromEvidence(outcome.authentication, {
+      service: "wsfe",
+      operation: outcome.operation,
+    });
+  }
+
   const issues = [...outcome.errors, ...outcome.observations];
   const firstIssue = issues[0];
   const message = firstIssue
@@ -1708,6 +1815,14 @@ function createWsfeOutcomeError(
 }
 
 function createWsfeServiceError(operation: string, issues: ArcaFiscalIssue[]) {
+  const authenticationError = classifyArcaAuthenticationIssues(issues, {
+    service: "wsfe",
+    operation,
+  });
+  if (authenticationError) {
+    return authenticationError;
+  }
+
   const firstIssue = issues[0];
   return new ArcaServiceError(
     firstIssue ? formatWsfeIssue(firstIssue) : "WSFE returned a service error",

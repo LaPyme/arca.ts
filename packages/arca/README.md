@@ -36,9 +36,11 @@ requests continue to use ARCA currency identifiers such as `PES` and `DOL`.
 
 `facturas` also exports `createMemoryWsaaSessionStore()` for tests/local single-process coordination and the small `ArcaWsaaSessionStore` interface for applications that need to share WSAA tickets across workers through their own durable store.
 
-Authenticated WSFE and WSMTXCA methods accept `forceRefresh: true` when callers need to discard the cached WSAA TA and request a fresh Token Authorization for the same service.
+Authenticated WSFE and WSMTXCA methods accept `forceRefresh: true` when callers need to discard the cached WSAA TA and request a fresh Token Authorization for the same service. Convenience operations retry once with a forced refresh only after a typed `ArcaAuthenticationError`; an already forced call, transport failure, invalid response, or generic service rejection is never retried by this recovery path.
 
-For durable fiscal workflows, `authorizeVoucherOutcome(...)` returns typed `authorized`, `rejected`, or `indeterminate` evidence and performs one authorization transport attempt. `lookupVoucher(...)` provides operation-scoped `found` or `not_found` recovery evidence. The existing `authorizeVoucher(...)`, `getVoucherInfo(...)`, and `getVoucher(...)` methods remain compatibility wrappers.
+For durable fiscal workflows, `authorizeVoucherOutcome(...)` returns typed `authorized`, `rejected`, or `indeterminate` evidence and performs one authorization transport attempt. Explicit authentication rejection is represented by `reason: "authentication_rejected"` and safe authentication evidence without resubmitting. `lookupVoucher(...)` provides operation-scoped `found` or `not_found` recovery evidence. The existing `authorizeVoucher(...)`, `getVoucherInfo(...)`, and `getVoucher(...)` methods remain compatibility wrappers.
+
+`createNextVoucher(...)` is a single-writer convenience. If authorization is explicitly rejected for authentication, it retries the same payload and the same previously fetched voucher number once; it does not fetch a new number.
 
 ## WSFE associated periods
 
