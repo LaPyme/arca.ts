@@ -1,5 +1,13 @@
 # facturas
 
+## 0.7.0
+
+### Minor Changes
+
+- 58d12a1: Add deterministic WSFE money handling and high-level Factura B/C builders. Receiver VAT condition is now required, exact amounts and exchange rates are validated and canonically serialized, input errors expose stable codes and field paths, builders accept integer minor units with ISO `ARS`/`USD` input and an `ARS` default, and the legacy `ARCA_CURRENCIES` export is deprecated without changing its values.
+- d12a5b8: Establish the v0.7.0 safe diagnostics contract. `client.config` now exposes an immutable credential-free operational view, transport and invalid-SOAP errors replace full response bodies with bounded redacted metadata, parsed provider details are removed from public errors, and internal logger events receive only safe scalar diagnostics.
+- 7c7bb9c: Add typed ARCA authentication failures and one proven-safe forced-refresh recovery attempt to authenticated convenience operations. Exact authorization outcome methods remain single-attempt and now expose safe authentication-rejection evidence; transport, parser, incomplete, contradictory, and generic service failures are never automatically resubmitted. Strengthen the packed runtime and declaration consumer contract for builders, currency constants, errors, and exact WSFE types.
+
 ## 0.6.1
 
 ### Patch Changes
