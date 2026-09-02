@@ -339,6 +339,72 @@ describe("createWsfeService", () => {
     expect(options.soap.execute).toHaveBeenCalledOnce();
   });
 
+  it("defaults an omitted peso exchange rate to one", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: {
+                Resultado: "A",
+                CAE: "123456789",
+                CAEFchVto: "20260501",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    await createWsfeService(options).authorizeVoucher({
+      data: createBaseVoucherInput({ exchangeRate: undefined }),
+      voucherNumber: 42,
+    });
+
+    expect(
+      options.soap.execute.mock.calls[0]?.[0].body.FeCAEReq.FeDetReq
+        .FECAEDetRequest
+    ).toMatchObject({
+      MonId: "PES",
+      MonCotiz: 1,
+    });
+  });
+
+  it.each([
+    {
+      name: "a non-unit peso rate",
+      overrides: { exchangeRate: 1.01 },
+      message: "exchangeRate must be 1 when currencyId is PES.",
+    },
+    {
+      name: "a missing foreign-currency rate",
+      overrides: { currencyId: "USD", exchangeRate: undefined },
+      message:
+        "exchangeRate is required unless sameCurrencyForeignCancellation is S for a foreign-currency voucher.",
+    },
+    {
+      name: "a non-positive foreign-currency rate",
+      overrides: { currencyId: "USD", exchangeRate: 0 },
+      message:
+        "exchangeRate must be a positive finite number for a foreign-currency voucher.",
+    },
+  ])("rejects $name before network work", async ({ overrides, message }) => {
+    const options = createBaseOptions();
+
+    await expect(
+      createWsfeService(options).createNextVoucher({
+        data: createBaseVoucherInput(overrides),
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaInputError",
+      code: "ARCA_INPUT_ERROR",
+      message,
+    });
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).not.toHaveBeenCalled();
+  });
+
   it("creates the next voucher and wraps WSFE collection fields", async () => {
     const options = createBaseOptions();
     options.soap.execute

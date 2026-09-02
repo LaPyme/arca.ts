@@ -767,18 +767,6 @@ function mapWsfeVoucherInput(
   input: NormalizedWsfeVoucherInput,
   voucherNumber: number
 ): Record<string, unknown> {
-  const sendsSameForeignCurrencyCancellation =
-    input.currencyId !== "PES" && input.sameCurrencyForeignCancellation === "S";
-
-  if (
-    input.exchangeRate === undefined &&
-    !sendsSameForeignCurrencyCancellation
-  ) {
-    throw new ArcaInputError(
-      "exchangeRate is required unless sameCurrencyForeignCancellation is S for a foreign-currency voucher."
-    );
-  }
-
   const data: Record<string, unknown> = {
     Concepto: input.concept,
     DocTipo: input.documentType,
@@ -797,7 +785,7 @@ function mapWsfeVoucherInput(
     CbteTipo: input.voucherType,
   };
 
-  if (!sendsSameForeignCurrencyCancellation) {
+  if (input.exchangeRate !== undefined) {
     data.MonCotiz = input.exchangeRate;
   }
 
@@ -898,6 +886,7 @@ function normalizeWsfeVoucherInput(
 ): NormalizedWsfeVoucherInput {
   const {
     voucherDate,
+    exchangeRate,
     serviceStartDate,
     serviceEndDate,
     paymentDueDate,
@@ -905,10 +894,14 @@ function normalizeWsfeVoucherInput(
     associatedPeriod,
     ...rest
   } = input;
+  const normalizedExchangeRate = normalizeWsfeExchangeRate(input, exchangeRate);
 
   return {
     ...rest,
     voucherDate: normalizeWsfeDateInput(voucherDate, "voucherDate"),
+    ...(normalizedExchangeRate === undefined
+      ? {}
+      : { exchangeRate: normalizedExchangeRate }),
     ...(serviceStartDate === undefined
       ? {}
       : {
@@ -968,6 +961,40 @@ function normalizeWsfeVoucherInput(
           },
         }),
   };
+}
+
+function normalizeWsfeExchangeRate(
+  input: Pick<
+    WsfeVoucherInput,
+    "currencyId" | "sameCurrencyForeignCancellation"
+  >,
+  exchangeRate: number | undefined
+): number | undefined {
+  if (input.currencyId === "PES") {
+    if (exchangeRate !== undefined && exchangeRate !== 1) {
+      throw new ArcaInputError(
+        "exchangeRate must be 1 when currencyId is PES."
+      );
+    }
+    return 1;
+  }
+
+  if (exchangeRate === undefined) {
+    if (input.sameCurrencyForeignCancellation === "S") {
+      return undefined;
+    }
+    throw new ArcaInputError(
+      "exchangeRate is required unless sameCurrencyForeignCancellation is S for a foreign-currency voucher."
+    );
+  }
+
+  if (!(Number.isFinite(exchangeRate) && exchangeRate > 0)) {
+    throw new ArcaInputError(
+      "exchangeRate must be a positive finite number for a foreign-currency voucher."
+    );
+  }
+
+  return exchangeRate;
 }
 
 function normalizeWsfeDateInput(
