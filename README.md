@@ -69,7 +69,9 @@ console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
 amount, zero-value fields, and total without floating-point tax arithmetic.
 `buildFacturaC()` separately builds the zero-IVA Factura C shape. Both builders
 accept integer currency minor units and support ISO `ARS` (the default) and
-`USD`.
+`USD`. Factura B requires a positive `taxableAmount`; when `vatRate` is
+positive, the amount must produce at least one currency minor unit of IVA after
+rounding.
 
 For a USD invoice, pass a decimal-string exchange rate:
 

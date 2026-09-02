@@ -46,6 +46,7 @@ type WsfeInvoiceBuilderBaseInput = {
 
 export type BuildFacturaBInput = WsfeInvoiceBuilderBaseInput &
   WsfeBuilderCurrencyInput & {
+    /** Positive integer currency minor units forming the taxable base. */
     taxableAmount: number;
     vatRate: WsfeBuilderVatRate;
   };
@@ -70,6 +71,17 @@ export function buildFacturaB(input: BuildFacturaBInput): WsfeVoucherInput {
     input.taxableAmount,
     "taxableAmount"
   );
+  if (taxableMinorUnits === 0n) {
+    throw new ArcaInputError(
+      "taxableAmount must be greater than zero for Factura B.",
+      {
+        code: "ARCA_INPUT_INVALID_AMOUNT",
+        field: "taxableAmount",
+        expected: "a positive safe integer in currency minor units",
+      }
+    );
+  }
+
   const vatMinorUnits = calculateVatMinorUnits(
     taxableMinorUnits,
     input.vatRate,

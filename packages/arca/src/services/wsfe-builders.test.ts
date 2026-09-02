@@ -99,7 +99,6 @@ describe("WSFE invoice builders", () => {
   });
 
   it.each([
-    [0, 21],
     [1, 21],
     [19, 2.5],
   ] as const)("rejects %s minor units at %s%% when positive-rate VAT rounds to zero", (taxableAmount, vatRate) => {
@@ -117,19 +116,21 @@ describe("WSFE invoice builders", () => {
     );
   });
 
-  it("keeps a zero taxable amount valid only with ARCA's zero VAT rate", () => {
-    expect(
+  it.each([
+    0, 21,
+  ] as const)("rejects a zero taxable Factura B at %s%% before building an IVA detail", (vatRate) => {
+    expect(() =>
       buildFacturaB({
         ...createBaseInput(),
         taxableAmount: 0,
-        vatRate: 0,
+        vatRate,
       })
-    ).toMatchObject({
-      totalAmount: 0,
-      netAmount: 0,
-      vatAmount: 0,
-      vatRates: [{ id: ARCA_VAT_RATES.IVA_0, baseAmount: 0, amount: 0 }],
-    });
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ARCA_INPUT_INVALID_AMOUNT",
+        field: "taxableAmount",
+      })
+    );
   });
 
   it("builds USD invoices with either a quotation or same-currency cancellation", () => {
