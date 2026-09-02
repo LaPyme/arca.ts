@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 const mockAssertArcaClientConfig = vi.hoisted(() => vi.fn());
 const mockNormalizeArcaClientConfig = vi.hoisted(() => vi.fn());
@@ -36,7 +36,7 @@ vi.mock("./internal/http", () => ({
   postXmlWithMetadata: mockPostXml,
 }));
 
-import { createArcaClient } from "./client";
+import { type ArcaClientConfigView, createArcaClient } from "./client";
 
 afterEach(() => {
   mockAssertArcaClientConfig.mockReset();
@@ -112,11 +112,78 @@ describe("createArcaClient", () => {
       soap,
     });
     expect(client).toEqual({
-      config,
+      config: {
+        taxId: config.taxId,
+        environment: config.environment,
+        timeout: config.timeout,
+        retries: config.retries,
+        retryDelay: config.retryDelay,
+      },
       wsfe,
       wsmtxca,
       padron,
     });
+    expect(Object.isFrozen(client.config)).toBe(true);
+    expectTypeOf(client.config).toEqualTypeOf<ArcaClientConfigView>();
+    type CredentialKeys = Extract<
+      keyof typeof client.config,
+      "certificatePem" | "privateKeyPem" | "logger" | "wsaaSessionStore"
+    >;
+    expectTypeOf<CredentialKeys>().toEqualTypeOf<never>();
+  });
+
+  it("exposes an immutable config view without serializable secrets", () => {
+    const sessionStore = {
+      Token: "stored-token-value",
+      Sign: "stored-sign-value",
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn().mockResolvedValue(undefined),
+    };
+    const config = {
+      taxId: "20123456789",
+      certificatePem:
+        "-----BEGIN CERTIFICATE-----\ncertificate-value\n-----END CERTIFICATE-----",
+      privateKeyPem:
+        "-----BEGIN PRIVATE KEY-----\nprivate-key-value\n-----END PRIVATE KEY-----",
+      environment: "test" as const,
+      timeout: 30_000,
+      retries: 1,
+      retryDelay: 500,
+      logger: {
+        level: "debug" as const,
+        log: vi.fn(),
+      },
+      wsaaSessionStore: sessionStore,
+    };
+
+    mockNormalizeArcaClientConfig.mockReturnValue(config);
+    mockCreateWsaaAuthModule.mockReturnValue({ login: vi.fn() });
+    mockCreateSoapTransport.mockReturnValue({ execute: vi.fn() });
+    mockCreateWsfeService.mockReturnValue({});
+    mockCreateWsmtxcaService.mockReturnValue({});
+    mockCreatePadronService.mockReturnValue({});
+
+    const client = createArcaClient(config);
+    const serializedClient = JSON.stringify(client);
+
+    expect(client.config).toEqual({
+      taxId: "20123456789",
+      environment: "test",
+      timeout: 30_000,
+      retries: 1,
+      retryDelay: 500,
+    });
+    expect(Object.isFrozen(client.config)).toBe(true);
+    expect(Reflect.set(client.config, "timeout", 1)).toBe(false);
+    expect(serializedClient).not.toMatch(
+      /certificatePem|privateKeyPem|logger|wsaaSessionStore/
+    );
+    expect(serializedClient).not.toMatch(/BEGIN (?:CERTIFICATE|PRIVATE KEY)/);
+    expect(serializedClient).not.toMatch(/"(?:Token|Sign)"/);
+    expect(serializedClient).not.toContain("stored-token-value");
+    expect(serializedClient).not.toContain("stored-sign-value");
+    expect(serializedClient).not.toContain("certificate-value");
+    expect(serializedClient).not.toContain("private-key-value");
   });
 
   it("emits logger calls during SOAP-backed client requests", async () => {
