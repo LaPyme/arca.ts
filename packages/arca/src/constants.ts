@@ -6,12 +6,28 @@ export const ARCA_VOUCHER_TYPES = {
   FACTURA_B: 6,
   NOTA_DEBITO_B: 7,
   NOTA_CREDITO_B: 8,
+  FACTURA_C: 11,
+  NOTA_DEBITO_C: 12,
+  NOTA_CREDITO_C: 13,
 } as const;
 
 /** Common document types accepted by ARCA services. */
 export const ARCA_DOCUMENT_TYPES = {
   CUIT: 80,
   DNI: 96,
+  CONSUMIDOR_FINAL: 99,
+} as const;
+
+/**
+ * Common receiver IVA condition identifiers used by WSFE.
+ * Allowed values depend on the voucher class and ARCA's live catalog.
+ */
+export const ARCA_RECEIVER_VAT_CONDITIONS = {
+  RESPONSABLE_INSCRIPTO: 1,
+  EXENTO: 4,
+  CONSUMIDOR_FINAL: 5,
+  MONOTRIBUTISTA: 6,
+  IVA_NO_ALCANZADO: 15,
 } as const;
 
 /** Supported invoice concept types for WSFE requests. */
@@ -27,6 +43,8 @@ export const ARCA_VAT_RATES = {
   IVA_10_5: 4,
   IVA_21: 5,
   IVA_27: 6,
+  IVA_5: 8,
+  IVA_2_5: 9,
 } as const;
 
 /** Common ARCA currency identifiers. */

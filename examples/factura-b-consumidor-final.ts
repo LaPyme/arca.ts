@@ -3,6 +3,7 @@ import {
   ARCA_CONCEPT_TYPES,
   ARCA_CURRENCIES,
   ARCA_DOCUMENT_TYPES,
+  ARCA_RECEIVER_VAT_CONDITIONS,
   ARCA_VAT_RATES,
   ARCA_VOUCHER_TYPES,
 } from "facturas/constants";
@@ -24,6 +25,7 @@ async function main() {
       concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
       documentType: ARCA_DOCUMENT_TYPES.DNI,
       documentNumber: 30_123_456,
+      receiverVatConditionId: ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
       voucherDate: "2026-05-01",
       totalAmount: 121,
       nonTaxableAmount: 0,

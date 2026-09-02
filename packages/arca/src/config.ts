@@ -29,8 +29,11 @@ export type CreateArcaClientConfigFromEnvOptions = {
 const PRIVATE_KEY_PEM_PREFIXES = [
   "-----BEGIN PRIVATE KEY-----",
   "-----BEGIN RSA PRIVATE KEY-----",
-  "-----BEGIN ENCRYPTED PRIVATE KEY-----",
 ] as const;
+const ENCRYPTED_PRIVATE_KEY_PEM_PREFIX =
+  "-----BEGIN ENCRYPTED PRIVATE KEY-----";
+const LEGACY_ENCRYPTED_RSA_PRIVATE_KEY_PATTERN =
+  /^-----BEGIN RSA PRIVATE KEY-----[\s\S]*^Proc-Type:\s*4,\s*ENCRYPTED\s*$/m;
 const VALID_ARCA_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 const DEFAULT_ARCA_TIMEOUT_MS = 30_000;
 const DEFAULT_ARCA_RETRIES = 0;
@@ -84,6 +87,15 @@ export function assertArcaClientConfig(config: ArcaClientConfig): void {
   const timeout = normalized.timeout ?? DEFAULT_ARCA_TIMEOUT_MS;
   const retries = normalized.retries ?? DEFAULT_ARCA_RETRIES;
   const retryDelay = normalized.retryDelay ?? DEFAULT_ARCA_RETRY_DELAY_MS;
+
+  if (
+    normalized.privateKeyPem.startsWith(ENCRYPTED_PRIVATE_KEY_PEM_PREFIX) ||
+    LEGACY_ENCRYPTED_RSA_PRIVATE_KEY_PATTERN.test(normalized.privateKeyPem)
+  ) {
+    throw new ArcaConfigurationError(
+      "Encrypted private keys are not supported. Provide an unencrypted PKCS#8 or RSA private key PEM."
+    );
+  }
 
   if (!/^\d{11}$/.test(normalized.taxId)) {
     invalidFields.push("taxId");

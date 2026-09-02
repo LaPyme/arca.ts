@@ -52,107 +52,160 @@ export function createWsaaAuthModule(
   options: CreateWsaaAuthModuleOptions
 ): WsaaAuthModule {
   const cache = new Map<string, ArcaAuthCredentials>();
-  const inFlight = new Map<string, Promise<ArcaAuthCredentials>>();
+  const ordinaryInFlight = new Map<string, Promise<ArcaAuthCredentials>>();
+  const forcedInFlight = new Map<string, Promise<ArcaAuthCredentials>>();
 
-  return {
-    async login(service, authOptions = {}) {
-      const sessionKey = buildWsaaSessionKey(options.config, service);
-      const cacheKey = serializeWsaaSessionKey(sessionKey);
-      const running = inFlight.get(cacheKey);
-      if (running) {
-        return running;
+  function trackLogin(
+    target: Map<string, Promise<ArcaAuthCredentials>>,
+    cacheKey: string,
+    login: () => Promise<ArcaAuthCredentials>
+  ): Promise<ArcaAuthCredentials> {
+    const promise = login();
+    target.set(cacheKey, promise);
+    const cleanup = () => {
+      if (target.get(cacheKey) === promise) {
+        target.delete(cacheKey);
       }
+    };
+    promise.then(cleanup, cleanup);
+    return promise;
+  }
 
-      const loginPromise = (async () => {
-        const reuse = await getReusableCredentials({
+  async function requestOrReuseWsaaCredentials(
+    service: ArcaWsaaServiceId,
+    sessionKey: ArcaWsaaSessionKey,
+    cacheKey: string,
+    forceRefresh: boolean
+  ): Promise<ArcaAuthCredentials> {
+    const reuse = await getReusableCredentials({
+      config: options.config,
+      cache,
+      cacheKey,
+      sessionKey,
+      logger: options.logger,
+      service,
+      allowStore: !forceRefresh,
+      allowCache: !forceRefresh,
+    });
+    if (reuse) {
+      return reuse;
+    }
+
+    const refresh = () =>
+      refreshWsaaCredentials({
+        config: options.config,
+        cache,
+        cacheKey,
+        sessionKey,
+        logger: options.logger,
+        service,
+        forceRefresh,
+      });
+
+    if (options.config.wsaaSessionStore?.withLock) {
+      return await withWsaaSessionStoreLock(
+        options.config,
+        sessionKey,
+        service,
+        refresh
+      );
+    }
+
+    return await refresh();
+  }
+
+  async function performLogin(
+    service: ArcaWsaaServiceId,
+    sessionKey: ArcaWsaaSessionKey,
+    cacheKey: string,
+    forceRefresh: boolean
+  ): Promise<ArcaAuthCredentials> {
+    try {
+      return await requestOrReuseWsaaCredentials(
+        service,
+        sessionKey,
+        cacheKey,
+        forceRefresh
+      );
+    } catch (error) {
+      if (
+        error instanceof ArcaSoapFaultError &&
+        error.faultCode === "ns1:coe.alreadyAuthenticated"
+      ) {
+        const recovered = await getReusableCredentials({
           config: options.config,
           cache,
           cacheKey,
           sessionKey,
           logger: options.logger,
           service,
-          allowStore: !authOptions.forceRefresh,
-          allowCache: !authOptions.forceRefresh,
+          allowStore: true,
+          allowCache: true,
         });
-        if (reuse) {
-          return reuse;
+        if (recovered) {
+          options.logger?.warn(
+            "Recovered WSAA coe.alreadyAuthenticated fault",
+            {
+              service,
+              faultCode: error.faultCode,
+            }
+          );
+          return recovered;
         }
 
-        const refresh = () =>
-          refreshWsaaCredentials({
-            config: options.config,
-            cache,
-            cacheKey,
-            sessionKey,
-            logger: options.logger,
-            service,
-            forceRefresh: authOptions.forceRefresh === true,
-          });
-
-        if (options.config.wsaaSessionStore?.withLock) {
-          return await withWsaaSessionStoreLock(
-            options.config,
-            sessionKey,
-            service,
-            refresh
+        if (!options.config.wsaaSessionStore) {
+          throw new ArcaConfigurationError(
+            "WSAA login failed because another process likely owns a valid TA. Configure a durable wsaaSessionStore for multi-process or serverless deployments.",
+            { cause: error }
           );
         }
-
-        return await refresh();
-      })();
-
-      inFlight.set(cacheKey, loginPromise);
-
-      try {
-        return await loginPromise;
-      } catch (error) {
-        if (
-          error instanceof ArcaSoapFaultError &&
-          error.faultCode === "ns1:coe.alreadyAuthenticated"
-        ) {
-          const recovered = await getReusableCredentials({
-            config: options.config,
-            cache,
-            cacheKey,
-            sessionKey,
-            logger: options.logger,
-            service,
-            allowStore: true,
-            allowCache: true,
-          });
-          if (recovered) {
-            options.logger?.warn(
-              "Recovered WSAA coe.alreadyAuthenticated fault",
-              {
-                service,
-                faultCode: error.faultCode,
-              }
-            );
-            return recovered;
-          }
-
-          if (!options.config.wsaaSessionStore) {
-            throw new ArcaConfigurationError(
-              "WSAA login failed because another process likely owns a valid TA. Configure a durable wsaaSessionStore for multi-process or serverless deployments.",
-              { cause: error }
-            );
-          }
-        }
-
-        if (error instanceof ArcaSoapFaultError) {
-          options.logger?.error("WSAA SOAP fault response", {
-            service,
-            operation: "loginCms",
-            url: ARCA_WSAA_CONFIG.endpoint[options.config.environment],
-            faultCode: error.faultCode,
-            error,
-          });
-        }
-
-        throw error;
-      } finally {
-        inFlight.delete(cacheKey);
       }
+
+      if (error instanceof ArcaSoapFaultError) {
+        options.logger?.error("WSAA SOAP fault response", {
+          service,
+          operation: "loginCms",
+          url: ARCA_WSAA_CONFIG.endpoint[options.config.environment],
+          faultCode: error.faultCode,
+          error,
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  return {
+    login(service, authOptions = {}) {
+      const sessionKey = buildWsaaSessionKey(options.config, service);
+      const cacheKey = serializeWsaaSessionKey(sessionKey);
+
+      if (authOptions.forceRefresh) {
+        const runningForced = forcedInFlight.get(cacheKey);
+        if (runningForced) {
+          return runningForced;
+        }
+
+        const runningOrdinary = ordinaryInFlight.get(cacheKey);
+        return trackLogin(forcedInFlight, cacheKey, async () => {
+          await runningOrdinary?.catch(() => undefined);
+          return await performLogin(service, sessionKey, cacheKey, true);
+        });
+      }
+
+      const runningOrdinary = ordinaryInFlight.get(cacheKey);
+      if (runningOrdinary) {
+        return runningOrdinary;
+      }
+
+      const runningForced = forcedInFlight.get(cacheKey);
+      if (runningForced) {
+        return runningForced;
+      }
+
+      return trackLogin(ordinaryInFlight, cacheKey, () =>
+        performLogin(service, sessionKey, cacheKey, false)
+      );
     },
   };
 }

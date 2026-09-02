@@ -33,6 +33,7 @@ import {
   ARCA_CONCEPT_TYPES,
   ARCA_CURRENCIES,
   ARCA_DOCUMENT_TYPES,
+  ARCA_RECEIVER_VAT_CONDITIONS,
   ARCA_VAT_RATES,
   ARCA_VOUCHER_TYPES,
 } from "facturas/constants";
@@ -46,6 +47,8 @@ const client = createArcaClient({
   environment: "test",
 });
 
+// createNextVoucher is for one writer per sales-point/voucher-type sequence.
+// Coordinate externally or authorize an explicitly reserved number when concurrent.
 const issued = await client.wsfe.createNextVoucher({
   data: {
     salesPoint: 1,
@@ -53,6 +56,9 @@ const issued = await client.wsfe.createNextVoucher({
     concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
     documentType: ARCA_DOCUMENT_TYPES.DNI,
     documentNumber: 30123456,
+    receiverVatConditionId:
+      ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
+    // Deterministic example date; use an ARCA-allowed current date in homologation.
     voucherDate: "2026-05-01",
     totalAmount: 121,
     nonTaxableAmount: 0,
@@ -132,6 +138,8 @@ The SDK normalizes provider protocol evidence only. Your application remains res
 ## Examples
 
 Examples live in [examples/](./examples) and are intentionally complete, hardcoded, and readable so they can be adapted quickly by a developer or a coding agent.
+Issuance examples use deterministic dates for compilation; replace them with an
+ARCA-allowed current date before a homologation request.
 
 - [factura-b-consumidor-final.ts](./examples/factura-b-consumidor-final.ts)
 - [factura-a-responsable-inscripto.ts](./examples/factura-a-responsable-inscripto.ts)
@@ -168,6 +176,7 @@ import {
   ARCA_CONCEPT_TYPES,
   ARCA_CURRENCIES,
   ARCA_DOCUMENT_TYPES,
+  ARCA_RECEIVER_VAT_CONDITIONS,
   ARCA_VAT_RATES,
   ARCA_VOUCHER_TYPES,
 } from "facturas/constants";
@@ -176,6 +185,9 @@ ARCA_VOUCHER_TYPES.FACTURA_A; // 1
 ARCA_VOUCHER_TYPES.FACTURA_B; // 6
 ARCA_DOCUMENT_TYPES.CUIT; // 80
 ARCA_DOCUMENT_TYPES.DNI; // 96
+ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL; // 99
+ARCA_RECEIVER_VAT_CONDITIONS.RESPONSABLE_INSCRIPTO; // 1
+ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL; // 5
 ARCA_CONCEPT_TYPES.SERVICIOS; // 2
 ARCA_VAT_RATES.IVA_21; // 5
 ARCA_CURRENCIES.PES; // "PES"
@@ -184,10 +196,11 @@ ARCA_CURRENCIES.DOL; // "DOL"
 
 The constants cover the most common values used by the README and examples:
 
-- voucher types for invoice A/B, debit note A/B, and credit note A/B
-- document types for CUIT and DNI
+- voucher types for invoice A/B/C, debit note A/B/C, and credit note A/B/C
+- document types for CUIT, DNI, and final consumers
+- common receiver IVA conditions, subject to voucher-class and live-catalog rules
 - concept types for products, services, and products + services
-- IVA rates for `0`, `10.5`, `21`, and `27`
+- IVA rates for `0`, `2.5`, `5`, `10.5`, `21`, and `27`
 - common currencies `PES` and `DOL`
 
 If you need broader catalogs at runtime, WSFE methods such as `getVoucherTypes()`, `getDocumentTypes()`, `getCurrencyTypes()`, and `getVatRates()` are still available.
