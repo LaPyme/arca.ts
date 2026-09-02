@@ -127,6 +127,9 @@ if (outcome.kind === "authorized") {
 } else if (outcome.kind === "rejected") {
   console.error(outcome.errors, outcome.observations);
 } else {
+  if (outcome.reason === "authentication_rejected") {
+    console.error(outcome.authentication?.reason);
+  }
   // Consult the same number before any new authorization attempt.
   const lookup = await client.wsfe.lookupVoucher({
     number: reservedVoucherNumber,
@@ -137,7 +140,15 @@ if (outcome.kind === "authorized") {
 }
 ```
 
-Authorization outcome methods force one SOAP transport attempt, even when the client has general transport retries configured. This prevents a timeout from causing a hidden second authorization. Read-only operations still use the configured retry policy. The compatibility `authorizeVoucher(...)` methods keep their success-or-throw contract.
+Authorization outcome methods force one SOAP transport attempt, even when the client has general transport retries configured. They never refresh credentials and resubmit automatically. An explicit provider authentication rejection is returned as `reason: "authentication_rejected"` with safe typed `authentication` evidence; a timeout, connection failure, invalid response, or incomplete/contradictory result remains indeterminate without resubmission. This prevents uncertain fiscal work from causing a hidden second authorization.
+
+The convenience `authorizeVoucher(...)` methods keep their success-or-throw
+contract and may repeat the exact same payload once after an explicit typed
+authentication rejection. WSFE `createNextVoucher(...)` applies the same rule
+to the number it already fetched; it never fetches another number for the retry.
+Authenticated read, catalog, and lookup convenience operations also perform at
+most one forced-refresh retry. Passing `forceRefresh: true` disables any further
+authentication recovery attempt.
 
 Exact lookup absence is operation-specific:
 
@@ -186,6 +197,34 @@ const exactData: WsfeVoucherInput = {
 
 Exact inputs and live catalog responses use ARCA protocol identifiers such as
 `PES` and `DOL`; only the high-level builders accept ISO `ARS` and `USD`.
+
+### Migrating amount and currency inputs
+
+Applications that previously rounded decimal major-unit values and translated
+currencies to ARCA IDs can move that provider-boundary work into a builder:
+
+```ts
+// Before: caller-owned decimal rounding and provider vocabulary.
+const exactAmount = Number(sourceAmount.toFixed(2));
+const exactCurrencyId = sourceCurrency === "ARS" ? "PES" : "DOL";
+
+// After: integer minor units and ISO currency input.
+const data = buildFacturaB({
+  salesPoint: 1,
+  concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
+  documentType: ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL,
+  documentNumber: 0,
+  receiverVatConditionId: ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
+  voucherDate: "2026-09-02",
+  taxableAmount: 10_000, // 100.00 in the selected currency.
+  vatRate: 21,
+  currency: "USD",
+  exchangeRate: "1095.5",
+});
+```
+
+Keep using `WsfeVoucherInput` when you need advanced exact fields. Its amounts
+remain decimal major-unit values and its `currencyId` remains an ARCA ID.
 
 ## Examples
 
@@ -402,7 +441,14 @@ Disable logging entirely with `logger: { disabled: true }`.
 
 ## Retries and timeouts
 
-Retries apply only to `ArcaTransportError`: timeouts, connection failures, and non-XML HTTP error responses. XML responses, including HTTP 500 SOAP faults, are parsed and surfaced as SOAP or service errors instead of being retried blindly.
+Configured transport retries apply only to `ArcaTransportError`: timeouts, connection failures, and non-XML HTTP error responses. XML responses, including HTTP 500 SOAP faults, are parsed and surfaced as SOAP or service errors instead of being retried blindly.
+
+Separately, authenticated WSFE and WSMTXCA convenience operations may perform
+one forced-refresh retry only after `ArcaAuthenticationError`. Timeouts,
+connection loss, invalid SOAP, incomplete evidence, contradictory evidence, and
+generic service rejections never unlock this recovery path. Both
+`authorizeVoucherOutcome(...)` methods always perform one exact authorization
+attempt, and each authorization SOAP attempt has transport retries set to zero.
 
 ## Service Surface
 
@@ -440,12 +486,14 @@ All errors extend `ArcaError` and expose a stable `code` string.
 | --- | --- |
 | `ArcaConfigurationError` | Invalid client config |
 | `ArcaInputError` | Invalid caller input such as a malformed date |
+| `ArcaAuthenticationError` | Explicit provider authentication rejection |
 | `ArcaTransportError` | HTTP or transport failure |
 | `ArcaSoapFaultError` | SOAP fault returned by ARCA |
 | `ArcaServiceError` | Business-level service rejection, especially WSFE-style errors |
 
 ```ts
 import {
+  ArcaAuthenticationError,
   ArcaServiceError,
   ArcaSoapFaultError,
   ArcaTransportError,
@@ -454,7 +502,14 @@ import {
 try {
   await client.wsfe.createNextVoucher({ data: /* ... */ });
 } catch (error) {
-  if (error instanceof ArcaServiceError) {
+  if (error instanceof ArcaAuthenticationError) {
+    console.error(
+      error.reason,
+      error.service,
+      error.operation,
+      error.providerCode
+    );
+  } else if (error instanceof ArcaServiceError) {
     console.error(error.serviceCode, error.message);
   } else if (error instanceof ArcaSoapFaultError) {
     console.error(error.faultCode, error.message);
@@ -466,6 +521,11 @@ try {
 ```
 
 Import error classes from `facturas` or `facturas/errors`.
+`isArcaAuthenticationError(error)` is also exported for predicate-style
+routing. Authentication errors expose only the stable code
+`ARCA_AUTHENTICATION_ERROR`, a typed `reason`, service, operation, and a safe
+provider code when available; raw provider bodies and credential values are not
+attached.
 
 ## Troubleshooting
 
