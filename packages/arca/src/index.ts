@@ -9,8 +9,14 @@ export {
   createArcaClientConfigFromEnv,
   resolveArcaEnvironment,
 } from "./config";
-export type { ArcaInputErrorCode, ArcaInputErrorOptions } from "./errors";
+export type {
+  ArcaAuthenticationErrorOptions,
+  ArcaAuthenticationReason,
+  ArcaInputErrorCode,
+  ArcaInputErrorOptions,
+} from "./errors";
 export {
+  ArcaAuthenticationError,
   ArcaConfigurationError,
   ArcaError,
   ArcaInputError,
@@ -18,8 +24,10 @@ export {
   ArcaServiceError,
   ArcaSoapFaultError,
   ArcaTransportError,
+  isArcaAuthenticationError,
 } from "./errors";
 export type {
+  ArcaAuthenticationEvidence,
   ArcaAuthorizationIndeterminateReason,
   ArcaAuthorizationOutcome,
   ArcaFiscalIssue,

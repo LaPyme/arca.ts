@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ArcaTransportError } from "../errors";
+import { ArcaSoapFaultError, ArcaTransportError } from "../errors";
 import { createWsmtxcaService } from "./wsmtxca";
 
 function createBaseOptions() {
@@ -276,6 +276,145 @@ describe("createWsmtxcaService", () => {
     expect(options.soap.execute).toHaveBeenCalledOnce();
   });
 
+  it("records typed WSMTXCA auth evidence without retrying exact outcomes", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockRejectedValueOnce(
+      new ArcaSoapFaultError(
+        "Token vencido Fecha y Hora de Vencimiento del Token Enviado",
+        { faultCode: "soapenv:Client" }
+      )
+    );
+
+    await expect(
+      createWsmtxcaService(options).authorizeVoucherOutcome({
+        data: { comprobanteCAERequest: { numeroComprobante: 11 } },
+      })
+    ).resolves.toMatchObject({
+      kind: "indeterminate",
+      reason: "authentication_rejected",
+      authentication: {
+        code: "ARCA_AUTHENTICATION_ERROR",
+        reason: "invalid_token",
+        providerCode: "soapenv:Client",
+      },
+    });
+    expect(options.auth.login).toHaveBeenCalledOnce();
+    expect(options.soap.execute).toHaveBeenCalledOnce();
+    expect(options.soap.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "autorizarComprobante", retries: 0 })
+    );
+  });
+
+  it("retries explicit WSMTXCA auth rejection once with the exact same payload", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockRejectedValueOnce(
+        new ArcaSoapFaultError("ValidacionDeToken: token vencido", {
+          faultCode: "soapenv:Client",
+        })
+      )
+      .mockResolvedValueOnce({
+        result: {
+          autorizarComprobanteResponse: {
+            resultado: "A",
+            comprobanteResponse: {
+              CAE: "12345678901234",
+              fechaVencimientoCAE: "20260301",
+              numeroComprobante: 11,
+            },
+          },
+        },
+      });
+    const data = {
+      comprobanteCAERequest: {
+        numeroComprobante: 11,
+        importeTotal: "121.00",
+      },
+    };
+
+    await expect(
+      createWsmtxcaService(options).authorizeVoucher({ data })
+    ).resolves.toMatchObject({ cae: "12345678901234", voucherNumber: 11 });
+
+    expect(options.auth.login).toHaveBeenCalledTimes(2);
+    expect(options.auth.login).toHaveBeenNthCalledWith(
+      2,
+      "wsmtxca",
+      expect.objectContaining({ forceRefresh: true })
+    );
+    expect(options.soap.execute).toHaveBeenCalledTimes(2);
+    for (const [request] of options.soap.execute.mock.calls) {
+      expect(request).toMatchObject({
+        operation: "autorizarComprobante",
+        retries: 0,
+        body: data,
+      });
+    }
+  });
+
+  it("does not retry WSMTXCA authorization after forceRefresh or transport failure", async () => {
+    const forcedOptions = createBaseOptions();
+    forcedOptions.soap.execute.mockRejectedValueOnce(
+      new ArcaSoapFaultError(
+        "Computador no autorizado a acceder a los servicios de AFIP",
+        { faultCode: "soapenv:Client" }
+      )
+    );
+
+    await expect(
+      createWsmtxcaService(forcedOptions).authorizeVoucher({
+        data: { comprobanteCAERequest: { numeroComprobante: 11 } },
+        forceRefresh: true,
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaAuthenticationError",
+      reason: "unauthorized_computer",
+    });
+    expect(forcedOptions.auth.login).toHaveBeenCalledOnce();
+    expect(forcedOptions.soap.execute).toHaveBeenCalledOnce();
+
+    const transportOptions = createBaseOptions();
+    transportOptions.soap.execute.mockRejectedValueOnce(
+      new ArcaTransportError("connection lost")
+    );
+    await expect(
+      createWsmtxcaService(transportOptions).authorizeVoucher({
+        data: { comprobanteCAERequest: { numeroComprobante: 11 } },
+      })
+    ).rejects.toBeInstanceOf(ArcaTransportError);
+    expect(transportOptions.auth.login).toHaveBeenCalledOnce();
+    expect(transportOptions.soap.execute).toHaveBeenCalledOnce();
+  });
+
+  it("recovers a WSMTXCA read once only after explicit auth rejection", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockRejectedValueOnce(
+        new ArcaSoapFaultError("No autorizado a acceder al servicio", {
+          faultCode: "soapenv:Client",
+        })
+      )
+      .mockResolvedValueOnce({
+        result: {
+          consultarPuntosVentaResponse: {
+            arrayPuntosVenta: {
+              puntoVenta: { numeroPuntoVenta: 1, bloqueado: "N" },
+            },
+          },
+        },
+      });
+
+    await expect(
+      createWsmtxcaService(options).getSalesPoints({})
+    ).resolves.toMatchObject({ salesPoints: [{ number: 1, blocked: false }] });
+    expect(options.auth.login).toHaveBeenCalledTimes(2);
+    expect(options.auth.login).toHaveBeenLastCalledWith(
+      "wsmtxca",
+      expect.objectContaining({ forceRefresh: true })
+    );
+    expect(options.soap.execute).toHaveBeenCalledTimes(2);
+  });
+
   it("queries the last authorized voucher using the default tax id", async () => {
     const options = createBaseOptions();
     options.soap.execute.mockResolvedValueOnce({
@@ -478,6 +617,8 @@ describe("createWsmtxcaService", () => {
       message:
         "Error 514: El Importe IVA del ítem no debe informarse | Obs 504: Código de producto sin GS1 válido",
     });
+    expect(options.auth.login).toHaveBeenCalledOnce();
+    expect(options.soap.execute).toHaveBeenCalledOnce();
   });
 
   it("normalizes WSMTXCA latest error 1502 to an empty sequence", async () => {

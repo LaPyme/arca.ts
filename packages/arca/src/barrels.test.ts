@@ -14,6 +14,8 @@ describe("barrel exports", () => {
   it("re-exports runtime factories from the package entrypoints", () => {
     expect(arca.createArcaClient).toBe(createArcaClient);
     expect(arca.createArcaClientConfigFromEnv).toBeTypeOf("function");
+    expect(arca.ArcaAuthenticationError).toBeTypeOf("function");
+    expect(arca.isArcaAuthenticationError).toBeTypeOf("function");
     expect(arca.createMemoryWsaaSessionStore).toBeTypeOf("function");
     expect(arca.createPadronService).toBe(createPadronService);
     expect(arca.createWsfeService).toBe(createWsfeService);

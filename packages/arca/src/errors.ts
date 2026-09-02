@@ -57,6 +57,49 @@ export class ArcaInputError extends ArcaError {
   }
 }
 
+/** Stable reasons exposed for explicit ARCA authentication rejections. */
+export type ArcaAuthenticationReason =
+  | "invalid_token"
+  | "unauthorized_computer"
+  | "missing_relationship"
+  | "authentication_rejected";
+
+export type ArcaAuthenticationErrorOptions = ErrorOptions & {
+  reason: ArcaAuthenticationReason;
+  service: ArcaServiceName;
+  operation: string;
+  providerCode?: string | number;
+};
+
+/** Thrown when ARCA explicitly rejects credentials before an operation runs. */
+export class ArcaAuthenticationError extends ArcaError {
+  declare readonly code: "ARCA_AUTHENTICATION_ERROR";
+  override readonly name: string = "ArcaAuthenticationError";
+  readonly reason: ArcaAuthenticationReason;
+  readonly service: ArcaServiceName;
+  readonly operation: string;
+  readonly providerCode?: string | number;
+
+  constructor(message: string, options: ArcaAuthenticationErrorOptions) {
+    super(
+      redactDiagnosticPreview(message),
+      "ARCA_AUTHENTICATION_ERROR",
+      options
+    );
+    this.reason = options.reason;
+    this.service = options.service;
+    this.operation = options.operation;
+    this.providerCode = normalizeProviderCode(options.providerCode);
+  }
+}
+
+/** Narrows unknown failures to the explicit authentication error contract. */
+export function isArcaAuthenticationError(
+  error: unknown
+): error is ArcaAuthenticationError {
+  return error instanceof ArcaAuthenticationError;
+}
+
 /** Thrown when an HTTP request to an ARCA endpoint fails at the transport level. */
 export class ArcaTransportError extends ArcaError {
   override readonly name: string = "ArcaTransportError";
@@ -176,4 +219,16 @@ export class ArcaServiceError extends ArcaError {
     this.cae = options?.cae;
     this.issues = options?.issues;
   }
+}
+
+function normalizeProviderCode(
+  providerCode: string | number | undefined
+): string | number | undefined {
+  if (typeof providerCode === "number") {
+    return Number.isFinite(providerCode) ? providerCode : undefined;
+  }
+  if (typeof providerCode === "string") {
+    return redactDiagnosticPreview(providerCode, 512);
+  }
+  return undefined;
 }

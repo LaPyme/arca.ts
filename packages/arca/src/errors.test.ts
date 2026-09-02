@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ArcaAuthenticationError,
   ArcaConfigurationError,
   ArcaError,
   ArcaInputError,
@@ -7,7 +8,12 @@ import {
   ArcaServiceError,
   ArcaSoapFaultError,
   ArcaTransportError,
+  isArcaAuthenticationError,
 } from "./errors";
+import {
+  classifyArcaAuthenticationCandidate,
+  classifyArcaAuthenticationError,
+} from "./internal/authentication";
 
 describe("errors", () => {
   it("assigns names, codes, and metadata for all ARCA error classes", () => {
@@ -15,6 +21,13 @@ describe("errors", () => {
 
     const baseError = new ArcaError("base", "ARCA_BASE", { cause });
     const configError = new ArcaConfigurationError("config", { cause });
+    const authenticationError = new ArcaAuthenticationError("auth", {
+      cause,
+      reason: "invalid_token",
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      providerCode: 600,
+    });
     const inputError = new ArcaInputError("input", {
       cause,
       code: "ARCA_INPUT_INVALID_DATE",
@@ -75,6 +88,17 @@ describe("errors", () => {
       name: "ArcaConfigurationError",
       code: "ARCA_CONFIGURATION_ERROR",
     });
+    expect(authenticationError).toMatchObject({
+      name: "ArcaAuthenticationError",
+      code: "ARCA_AUTHENTICATION_ERROR",
+      reason: "invalid_token",
+      service: "wsfe",
+      operation: "FECAESolicitar",
+      providerCode: 600,
+      cause,
+    });
+    expect(isArcaAuthenticationError(authenticationError)).toBe(true);
+    expect(isArcaAuthenticationError(configError)).toBe(false);
     expect(inputError).toMatchObject({
       name: "ArcaInputError",
       code: "ARCA_INPUT_INVALID_DATE",
@@ -167,5 +191,122 @@ describe("errors", () => {
     expect(JSON.stringify(soapFault)).not.toMatch(
       /token-value|sign-value|fault-code-token/
     );
+  });
+
+  it.each([
+    {
+      name: "WSFE token/sign code",
+      service: "wsfe" as const,
+      providerCode: "600",
+      message: "unrelated provider text",
+      reason: "invalid_token",
+    },
+    {
+      name: "WSFE represented-CUIT code",
+      service: "wsfe" as const,
+      providerCode: 601,
+      message: "unrelated provider text",
+      reason: "missing_relationship",
+    },
+    {
+      name: "token validation text",
+      service: "wsmtxca" as const,
+      message: "ValidacionDeToken: firma inválida",
+      reason: "invalid_token",
+    },
+    {
+      name: "expired token text",
+      service: "wsmtxca" as const,
+      message: "Token vencido Fecha y Hora de Vencimiento",
+      reason: "invalid_token",
+    },
+    {
+      name: "unauthorized computer text",
+      service: "wsmtxca" as const,
+      message: "Computador no autorizado a acceder a los servicios de AFIP",
+      reason: "unauthorized_computer",
+    },
+    {
+      name: "service access text",
+      service: "wsmtxca" as const,
+      message: "No autorizado a acceder al servicio",
+      reason: "authentication_rejected",
+    },
+    {
+      name: "missing relationship with accent",
+      service: "wsmtxca" as const,
+      message: "No apareció CUIT en lista de relaciones",
+      reason: "missing_relationship",
+    },
+    {
+      name: "missing relationship without accent",
+      service: "wsmtxca" as const,
+      message: "No aparecio CUIT en lista de relaciones",
+      reason: "missing_relationship",
+    },
+  ])("classifies $name as a typed authentication error", (fixture) => {
+    const error = classifyArcaAuthenticationCandidate({
+      service: fixture.service,
+      operation: "operation",
+      providerCode: fixture.providerCode,
+      message: fixture.message,
+    });
+
+    expect(error).toMatchObject({
+      name: "ArcaAuthenticationError",
+      code: "ARCA_AUTHENTICATION_ERROR",
+      reason: fixture.reason,
+      service: fixture.service,
+      operation: "operation",
+    });
+    expect(error?.message).not.toContain(fixture.message);
+  });
+
+  it.each([
+    "ValidacionDeTokens: plural near miss",
+    "El computador fue autorizado previamente",
+    "No autorizado a emitir comprobantes",
+    "El token budget no alcanzó",
+    "No apareció CUIT en una lista de relaciones comerciales",
+  ])("does not classify near-miss provider text: %s", (message) => {
+    expect(
+      classifyArcaAuthenticationCandidate({
+        service: "wsmtxca",
+        operation: "operation",
+        message,
+      })
+    ).toBeUndefined();
+  });
+
+  it("does not inspect arbitrary errors, nested causes, or serialized graphs", () => {
+    const error = new Error("generic wrapper", {
+      cause: {
+        message: "ValidacionDeToken",
+        nested: { faultstring: "Computador no autorizado" },
+      },
+    });
+
+    expect(
+      classifyArcaAuthenticationError(error, {
+        service: "wsfe",
+        operation: "FECAESolicitar",
+      })
+    ).toBeUndefined();
+  });
+
+  it("redacts and bounds authentication metadata", () => {
+    const error = new ArcaAuthenticationError(
+      `<Token>token-value</Token>${"x".repeat(5000)}`,
+      {
+        reason: "authentication_rejected",
+        service: "wsfe",
+        operation: "FECAESolicitar",
+        providerCode: `<Sign>sign-value</Sign>${"y".repeat(1000)}`,
+      }
+    );
+
+    expect(error.message).toHaveLength(4096);
+    expect(error.providerCode).toHaveLength(512);
+    expect(JSON.stringify(error)).not.toMatch(/token-value|sign-value/);
   });
 });

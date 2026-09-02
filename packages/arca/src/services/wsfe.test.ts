@@ -340,6 +340,179 @@ describe("createWsfeService", () => {
     expect(options.soap.execute).toHaveBeenCalledOnce();
   });
 
+  it("records typed authentication evidence without retrying exact outcomes", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FECAESolicitar", {
+        Errors: {
+          Err: {
+            Code: 600,
+            Msg: "ValidacionDeToken: token y firma rechazados",
+          },
+        },
+      })
+    );
+
+    await expect(
+      createWsfeService(options).authorizeVoucherOutcome({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+      })
+    ).resolves.toMatchObject({
+      kind: "indeterminate",
+      reason: "authentication_rejected",
+      authentication: {
+        code: "ARCA_AUTHENTICATION_ERROR",
+        reason: "invalid_token",
+        providerCode: "600",
+      },
+    });
+    expect(options.auth.login).toHaveBeenCalledOnce();
+    expect(options.soap.execute).toHaveBeenCalledOnce();
+    expect(options.soap.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "FECAESolicitar", retries: 0 })
+    );
+  });
+
+  it("retries an explicit WSFE authentication rejection once with the same authorization", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockResolvedValueOnce(
+        createWsfeOperationResult("FECAESolicitar", {
+          Errors: {
+            Err: { Code: 600, Msg: "No se corresponden token y firma" },
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        createWsfeOperationResult("FECAESolicitar", {
+          FeDetResp: {
+            FECAEDetResponse: {
+              Resultado: "A",
+              CAE: "123456789",
+              CAEFchVto: "20260501",
+            },
+          },
+        })
+      );
+
+    await expect(
+      createWsfeService(options).authorizeVoucher({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+      })
+    ).resolves.toMatchObject({
+      cae: "123456789",
+      voucherNumber: 77,
+    });
+
+    expect(options.auth.login).toHaveBeenCalledTimes(2);
+    expect(options.auth.login).toHaveBeenNthCalledWith(
+      2,
+      "wsfe",
+      expect.objectContaining({ forceRefresh: true })
+    );
+    expect(options.soap.execute).toHaveBeenCalledTimes(2);
+    for (const [request] of options.soap.execute.mock.calls) {
+      expect(request).toMatchObject({
+        operation: "FECAESolicitar",
+        retries: 0,
+        body: {
+          FeCAEReq: {
+            FeDetReq: {
+              FECAEDetRequest: {
+                CbteDesde: 77,
+                CbteHasta: 77,
+              },
+            },
+          },
+        },
+      });
+    }
+  });
+
+  it("does not retry authorization after forceRefresh or an indeterminate failure", async () => {
+    const forcedOptions = createBaseOptions();
+    forcedOptions.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FECAESolicitar", {
+        Errors: {
+          Err: { Code: 601, Msg: "CUIT representada no incluida en token" },
+        },
+      })
+    );
+
+    await expect(
+      createWsfeService(forcedOptions).authorizeVoucher({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+        forceRefresh: true,
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaAuthenticationError",
+      reason: "missing_relationship",
+    });
+    expect(forcedOptions.auth.login).toHaveBeenCalledOnce();
+    expect(forcedOptions.soap.execute).toHaveBeenCalledOnce();
+
+    const transportOptions = createBaseOptions();
+    transportOptions.soap.execute.mockRejectedValueOnce(
+      new ArcaTransportError("connection lost")
+    );
+    await expect(
+      createWsfeService(transportOptions).authorizeVoucher({
+        data: createBaseVoucherInput(),
+        voucherNumber: 77,
+      })
+    ).rejects.toBeInstanceOf(ArcaTransportError);
+    expect(transportOptions.auth.login).toHaveBeenCalledOnce();
+    expect(transportOptions.soap.execute).toHaveBeenCalledOnce();
+  });
+
+  it("recovers read operations only from explicit authentication errors", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockResolvedValueOnce(
+        createWsfeOperationResult("FEParamGetTiposCbte", {
+          Errors: {
+            Err: { Code: 600, Msg: "No se corresponden token y firma" },
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        createWsfeOperationResult("FEParamGetTiposCbte", {
+          ResultGet: {
+            CbteTipo: { Id: 6, Desc: "Factura B" },
+          },
+        })
+      );
+
+    await expect(
+      createWsfeService(options).getVoucherTypes({})
+    ).resolves.toEqual([{ id: 6, description: "Factura B" }]);
+    expect(options.auth.login).toHaveBeenCalledTimes(2);
+    expect(options.auth.login).toHaveBeenNthCalledWith(
+      2,
+      "wsfe",
+      expect.objectContaining({ forceRefresh: true })
+    );
+    expect(options.soap.execute).toHaveBeenCalledTimes(2);
+
+    const businessOptions = createBaseOptions();
+    businessOptions.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FEParamGetTiposCbte", {
+        Errors: { Err: { Code: 700, Msg: "Error de catálogo" } },
+      })
+    );
+    await expect(
+      createWsfeService(businessOptions).getVoucherTypes({})
+    ).rejects.toMatchObject({
+      name: "ArcaServiceError",
+      serviceCode: "700",
+    });
+    expect(businessOptions.auth.login).toHaveBeenCalledOnce();
+    expect(businessOptions.soap.execute).toHaveBeenCalledOnce();
+  });
+
   it("defaults an omitted peso exchange rate to one", async () => {
     const options = createBaseOptions();
     options.soap.execute.mockResolvedValueOnce({
@@ -813,6 +986,56 @@ describe("createWsfeService", () => {
         },
       },
     });
+  });
+
+  it("retries createNextVoucher with the originally fetched voucher number", async () => {
+    const options = createBaseOptions();
+    options.soap.execute
+      .mockResolvedValueOnce(
+        createWsfeOperationResult("FECompUltimoAutorizado", { CbteNro: 41 })
+      )
+      .mockResolvedValueOnce(
+        createWsfeOperationResult("FECAESolicitar", {
+          Errors: {
+            Err: { Code: 600, Msg: "No se corresponden token y firma" },
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        createWsfeOperationResult("FECAESolicitar", {
+          FeDetResp: {
+            FECAEDetResponse: {
+              Resultado: "A",
+              CAE: "123456789",
+              CAEFchVto: "20260501",
+            },
+          },
+        })
+      );
+
+    await expect(
+      createWsfeService(options).createNextVoucher({
+        data: createBaseVoucherInput(),
+      })
+    ).resolves.toMatchObject({ voucherNumber: 42, cae: "123456789" });
+
+    expect(options.soap.execute).toHaveBeenCalledTimes(3);
+    expect(
+      options.soap.execute.mock.calls.map(([request]) => request.operation)
+    ).toEqual(["FECompUltimoAutorizado", "FECAESolicitar", "FECAESolicitar"]);
+    const authorizationRequests = options.soap.execute.mock.calls.slice(1);
+    for (const [request] of authorizationRequests) {
+      expect(request.body.FeCAEReq.FeDetReq.FECAEDetRequest).toMatchObject({
+        CbteDesde: 42,
+        CbteHasta: 42,
+      });
+      expect(request.retries).toBe(0);
+    }
+    expect(options.auth.login).toHaveBeenCalledTimes(3);
+    expect(options.auth.login).toHaveBeenLastCalledWith(
+      "wsfe",
+      expect.objectContaining({ forceRefresh: true })
+    );
   });
 
   it("omits MonCotiz when foreign-currency vouchers are cancelled in the same currency", async () => {

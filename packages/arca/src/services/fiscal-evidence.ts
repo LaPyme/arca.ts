@@ -1,3 +1,5 @@
+import type { ArcaAuthenticationReason } from "../errors";
+
 /** ARCA services that authorize fiscal vouchers. */
 export type ArcaFiscalService = "wsfe" | "wsmtxca";
 
@@ -24,12 +26,20 @@ export type ArcaFiscalIssue = {
 
 /** Why an authorization response cannot prove approval or rejection. */
 export type ArcaAuthorizationIndeterminateReason =
+  | "authentication_rejected"
   | "transport_error"
   | "soap_fault"
   | "invalid_response"
   | "incomplete_response"
   | "contradictory_response"
   | "unexpected_error";
+
+/** Safe authentication evidence attached to an exact authorization outcome. */
+export type ArcaAuthenticationEvidence = {
+  code: "ARCA_AUTHENTICATION_ERROR";
+  reason: ArcaAuthenticationReason;
+  providerCode?: string | number;
+};
 
 type ArcaAuthorizationEvidenceBase<
   TService extends ArcaFiscalService = ArcaFiscalService,
@@ -62,6 +72,7 @@ export type ArcaAuthorizationOutcome<
   | (ArcaAuthorizationEvidenceBase<TService> & {
       kind: "indeterminate";
       reason: ArcaAuthorizationIndeterminateReason;
+      authentication?: ArcaAuthenticationEvidence;
       result?: string;
       resultLevel?: ArcaFiscalResultLevel;
       cae?: string;
