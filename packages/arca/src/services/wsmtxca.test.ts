@@ -88,6 +88,54 @@ describe("createWsmtxcaService", () => {
         },
       },
     });
+    expect(Object.keys(options.soap.execute.mock.calls[0]?.[0].body)).toEqual([
+      "comprobanteCAERequest",
+      "authRequest",
+    ]);
+  });
+
+  it("rejects caller-provided WSMTXCA authentication before network work", async () => {
+    const options = createBaseOptions();
+    const service = createWsmtxcaService(options);
+
+    await expect(
+      service.authorizeVoucher({
+        data: {
+          authRequest: {
+            token: "caller-token",
+            sign: "caller-sign",
+          },
+          comprobanteCAERequest: {
+            numeroComprobante: 11,
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaInputError",
+      code: "ARCA_INPUT_ERROR",
+      message:
+        'WSMTXCA authorization data cannot include the reserved top-level field "authRequest".',
+    });
+    await expect(
+      service.authorizeVoucherOutcome({
+        data: {
+          authRequest: {
+            token: "caller-token",
+            sign: "caller-sign",
+          },
+          comprobanteCAERequest: {
+            numeroComprobante: 11,
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      name: "ArcaInputError",
+      code: "ARCA_INPUT_ERROR",
+      message:
+        'WSMTXCA authorization data cannot include the reserved top-level field "authRequest".',
+    });
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -1,4 +1,5 @@
 import {
+  ArcaInputError,
   ArcaInvalidSoapResponseError,
   ArcaServiceError,
   ArcaSoapFaultError,
@@ -163,12 +164,12 @@ export function createWsmtxcaService(
       bodyElementName: `${operation}Request`,
       bodyElementNamespaceMode: "prefix",
       body: {
+        ...body,
         authRequest: createWsmtxcaAuth(
           input.representedTaxId ?? options.config.taxId,
           auth.token,
           auth.sign
         ),
-        ...body,
       },
     });
 
@@ -183,6 +184,12 @@ export function createWsmtxcaService(
     outcome: WsmtxcaAuthorizationOutcome;
     error?: unknown;
   }> {
+    if (Object.hasOwn(data, "authRequest")) {
+      throw new ArcaInputError(
+        'WSMTXCA authorization data cannot include the reserved top-level field "authRequest".'
+      );
+    }
+
     try {
       const raw = await executeWsmtxcaAuthenticatedOperation(
         "autorizarComprobante",
