@@ -30,6 +30,46 @@ describe("config", () => {
     ).not.toThrow();
   });
 
+  it("rejects encrypted private keys in direct configuration", () => {
+    expect(() =>
+      assertArcaClientConfig({
+        taxId: "20123456789",
+        certificatePem:
+          "-----BEGIN CERTIFICATE-----\nTEST_CERTIFICATE\n-----END CERTIFICATE-----",
+        privateKeyPem:
+          "-----BEGIN ENCRYPTED PRIVATE KEY-----\nTEST_KEY\n-----END ENCRYPTED PRIVATE KEY-----",
+        environment: "test",
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaConfigurationError",
+        code: "ARCA_CONFIGURATION_ERROR",
+        message:
+          "Encrypted private keys are not supported. Provide an unencrypted PKCS#8 or RSA private key PEM.",
+      })
+    );
+  });
+
+  it("rejects legacy encrypted RSA private keys in direct configuration", () => {
+    expect(() =>
+      assertArcaClientConfig({
+        taxId: "20123456789",
+        certificatePem:
+          "-----BEGIN CERTIFICATE-----\nTEST_CERTIFICATE\n-----END CERTIFICATE-----",
+        privateKeyPem:
+          "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,TEST_IV\n\nTEST_KEY\n-----END RSA PRIVATE KEY-----",
+        environment: "test",
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaConfigurationError",
+        code: "ARCA_CONFIGURATION_ERROR",
+        message:
+          "Encrypted private keys are not supported. Provide an unencrypted PKCS#8 or RSA private key PEM.",
+      })
+    );
+  });
+
   it("preserves optional WSAA session store configuration", () => {
     const wsaaSessionStore = {
       get: async () => null,
@@ -86,6 +126,48 @@ describe("config", () => {
       retries: 0,
       retryDelay: 500,
     });
+  });
+
+  it("rejects encrypted private keys loaded from environment variables", () => {
+    expect(() =>
+      createArcaClientConfigFromEnv({
+        env: {
+          [ARCA_ENV_VARIABLES.taxId]: "20123456789",
+          [ARCA_ENV_VARIABLES.certificatePem]:
+            "-----BEGIN CERTIFICATE-----\nTEST_CERTIFICATE\n-----END CERTIFICATE-----",
+          [ARCA_ENV_VARIABLES.privateKeyPem]:
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nTEST_KEY\n-----END ENCRYPTED PRIVATE KEY-----",
+        },
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaConfigurationError",
+        code: "ARCA_CONFIGURATION_ERROR",
+        message:
+          "Encrypted private keys are not supported. Provide an unencrypted PKCS#8 or RSA private key PEM.",
+      })
+    );
+  });
+
+  it("rejects legacy encrypted RSA private keys loaded from environment variables", () => {
+    expect(() =>
+      createArcaClientConfigFromEnv({
+        env: {
+          [ARCA_ENV_VARIABLES.taxId]: "20123456789",
+          [ARCA_ENV_VARIABLES.certificatePem]:
+            "-----BEGIN CERTIFICATE-----\nTEST_CERTIFICATE\n-----END CERTIFICATE-----",
+          [ARCA_ENV_VARIABLES.privateKeyPem]:
+            "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,TEST_IV\n\nTEST_KEY\n-----END RSA PRIVATE KEY-----",
+        },
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaConfigurationError",
+        code: "ARCA_CONFIGURATION_ERROR",
+        message:
+          "Encrypted private keys are not supported. Provide an unencrypted PKCS#8 or RSA private key PEM.",
+      })
+    );
   });
 
   it("rejects invalid environment values loaded from env helpers", () => {
