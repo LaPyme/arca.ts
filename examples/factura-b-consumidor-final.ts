@@ -1,11 +1,8 @@
-import { createArcaClient } from "facturas";
+import { buildFacturaB, createArcaClient } from "facturas";
 import {
   ARCA_CONCEPT_TYPES,
-  ARCA_CURRENCIES,
   ARCA_DOCUMENT_TYPES,
   ARCA_RECEIVER_VAT_CONDITIONS,
-  ARCA_VAT_RATES,
-  ARCA_VOUCHER_TYPES,
 } from "facturas/constants";
 
 const client = createArcaClient({
@@ -18,31 +15,20 @@ const client = createArcaClient({
 });
 
 async function main() {
+  const data = buildFacturaB({
+    salesPoint: 1,
+    concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
+    documentType: ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL,
+    documentNumber: 0,
+    receiverVatConditionId: ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
+    voucherDate: "2026-09-02",
+    taxableAmount: 10_000,
+    vatRate: 21,
+  });
+
+  // Single-writer convenience: coordinate this sales-point/voucher-type lane.
   const issued = await client.wsfe.createNextVoucher({
-    data: {
-      salesPoint: 1,
-      voucherType: ARCA_VOUCHER_TYPES.FACTURA_B,
-      concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
-      documentType: ARCA_DOCUMENT_TYPES.DNI,
-      documentNumber: 30_123_456,
-      receiverVatConditionId: ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
-      voucherDate: "2026-05-01",
-      totalAmount: 121,
-      nonTaxableAmount: 0,
-      netAmount: 100,
-      exemptAmount: 0,
-      taxAmount: 0,
-      vatAmount: 21,
-      currencyId: ARCA_CURRENCIES.PES,
-      exchangeRate: 1,
-      vatRates: [
-        {
-          id: ARCA_VAT_RATES.IVA_21,
-          baseAmount: 100,
-          amount: 21,
-        },
-      ],
-    },
+    data,
   });
 
   console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);

@@ -1,7 +1,7 @@
 import { createArcaClient } from "facturas";
 import {
   ARCA_CONCEPT_TYPES,
-  ARCA_CURRENCIES,
+  ARCA_CURRENCY_IDS,
   ARCA_DOCUMENT_TYPES,
   ARCA_RECEIVER_VAT_CONDITIONS,
   ARCA_VAT_RATES,
@@ -34,7 +34,7 @@ async function main() {
       exemptAmount: 0,
       taxAmount: 0,
       vatAmount: 420,
-      currencyId: ARCA_CURRENCIES.PES,
+      currencyId: ARCA_CURRENCY_IDS.ARS,
       exchangeRate: 1,
       serviceStartDate: "2026-05-01",
       serviceEndDate: "2026-05-31",
