@@ -88,6 +88,17 @@ function createHttpResponse(body: string) {
   };
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return { promise, reject, resolve };
+}
+
 async function loadWsaaModule() {
   const module = await import("./index");
   return module;
@@ -157,6 +168,140 @@ describe("createWsaaAuthModule", () => {
     expect(firstCredentials).toEqual(secondCredentials);
     await expect(auth.login("wsfe")).resolves.toEqual(firstCredentials);
     expect(mockPostXml).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues and deduplicates forced refreshes behind ordinary work", async () => {
+    const ordinaryResponse =
+      createDeferred<ReturnType<typeof createHttpResponse>>();
+    const forcedResponse =
+      createDeferred<ReturnType<typeof createHttpResponse>>();
+    mockPostXml
+      .mockImplementationOnce(() => ordinaryResponse.promise)
+      .mockImplementationOnce(() => forcedResponse.promise);
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({ config: createWsaaConfig() });
+
+    const ordinaryLogin = auth.login("wsfe");
+    const ordinaryFollower = auth.login("wsfe");
+    const firstForcedLogin = auth.login("wsfe", { forceRefresh: true });
+    const secondForcedLogin = auth.login("wsfe", { forceRefresh: true });
+
+    await vi.waitFor(() => {
+      expect(mockPostXml).toHaveBeenCalledTimes(1);
+    });
+    ordinaryResponse.resolve(
+      createHttpResponse(
+        createWsaaSoapResponse(
+          createLoginTicketResponseXml({ token: "ordinary-token" })
+        )
+      )
+    );
+
+    await expect(
+      Promise.all([ordinaryLogin, ordinaryFollower])
+    ).resolves.toEqual([
+      expect.objectContaining({ token: "ordinary-token" }),
+      expect.objectContaining({ token: "ordinary-token" }),
+    ]);
+    await vi.waitFor(() => {
+      expect(mockPostXml).toHaveBeenCalledTimes(2);
+    });
+
+    const ordinaryDuringForced = auth.login("wsfe");
+    forcedResponse.resolve(
+      createHttpResponse(
+        createWsaaSoapResponse(
+          createLoginTicketResponseXml({ token: "forced-token" })
+        )
+      )
+    );
+
+    await expect(
+      Promise.all([firstForcedLogin, secondForcedLogin, ordinaryDuringForced])
+    ).resolves.toEqual([
+      expect.objectContaining({ token: "forced-token" }),
+      expect.objectContaining({ token: "forced-token" }),
+      expect.objectContaining({ token: "forced-token" }),
+    ]);
+    expect(mockPostXml).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets ordinary and forced callers join active forced work", async () => {
+    const forcedResponse =
+      createDeferred<ReturnType<typeof createHttpResponse>>();
+    mockPostXml.mockImplementationOnce(() => forcedResponse.promise);
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({ config: createWsaaConfig() });
+
+    const forcedLeader = auth.login("wsmtxca", { forceRefresh: true });
+    const ordinaryFollower = auth.login("wsmtxca");
+    const forcedFollower = auth.login("wsmtxca", { forceRefresh: true });
+
+    await vi.waitFor(() => {
+      expect(mockPostXml).toHaveBeenCalledTimes(1);
+    });
+    forcedResponse.resolve(
+      createHttpResponse(
+        createWsaaSoapResponse(
+          createLoginTicketResponseXml({ token: "forced-token" })
+        )
+      )
+    );
+
+    await expect(
+      Promise.all([forcedLeader, ordinaryFollower, forcedFollower])
+    ).resolves.toEqual([
+      expect.objectContaining({ token: "forced-token" }),
+      expect.objectContaining({ token: "forced-token" }),
+      expect.objectContaining({ token: "forced-token" }),
+    ]);
+    expect(mockPostXml).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs one queued forced refresh after ordinary work rejects", async () => {
+    const ordinaryResponse =
+      createDeferred<ReturnType<typeof createHttpResponse>>();
+    const forcedResponse =
+      createDeferred<ReturnType<typeof createHttpResponse>>();
+    mockPostXml
+      .mockImplementationOnce(() => ordinaryResponse.promise)
+      .mockImplementationOnce(() => forcedResponse.promise);
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({ config: createWsaaConfig() });
+
+    const ordinaryLogin = auth.login("wsfe").catch((error: unknown) => error);
+    const firstForcedLogin = auth.login("wsfe", { forceRefresh: true });
+    const secondForcedLogin = auth.login("wsfe", { forceRefresh: true });
+
+    await vi.waitFor(() => {
+      expect(mockPostXml).toHaveBeenCalledTimes(1);
+    });
+    ordinaryResponse.reject(new Error("ordinary WSAA failure"));
+
+    await expect(ordinaryLogin).resolves.toMatchObject({
+      message: "ordinary WSAA failure",
+    });
+    await vi.waitFor(() => {
+      expect(mockPostXml).toHaveBeenCalledTimes(2);
+    });
+    forcedResponse.resolve(
+      createHttpResponse(
+        createWsaaSoapResponse(
+          createLoginTicketResponseXml({ token: "recovered-token" })
+        )
+      )
+    );
+
+    await expect(
+      Promise.all([firstForcedLogin, secondForcedLogin])
+    ).resolves.toEqual([
+      expect.objectContaining({ token: "recovered-token" }),
+      expect.objectContaining({ token: "recovered-token" }),
+    ]);
+    expect(mockPostXml).toHaveBeenCalledTimes(2);
   });
 
   it("forces a refresh when requested and keeps the default cache in memory only", async () => {
