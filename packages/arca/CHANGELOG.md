@@ -1,5 +1,11 @@
 # facturas
 
+## 0.6.1
+
+### Patch Changes
+
+- c2f7277: Reject encrypted PKCS#8 and legacy RSA private keys during configuration, preserve forced WSAA refresh intent under local concurrency, and reject caller-supplied WSMTXCA authentication fields before network work. Normalize omitted peso exchange rates to one, validate foreign exchange rates, add common ARCA voucher, document, receiver IVA condition, and VAT rate constants, and correct the invoice examples.
+
 ## 0.6.0
 
 ### Minor Changes
