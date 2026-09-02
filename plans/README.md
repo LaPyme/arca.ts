@@ -41,4 +41,3 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED: <reason>`, or
 - Refactoring the large WSFE and WSMTXCA service modules: deferred until
   contract fixtures exist and the v0.7.0 API is stable.
 - Adding WSFEX, CAEA, or new FCE capabilities: outside this hardening program.
-

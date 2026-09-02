@@ -42,7 +42,7 @@ jobs:
         run: pnpm test:coverage
 
       - name: Check package exports
-        if: matrix.node-version == 24
+        if: matrix.node-version == 20 || matrix.node-version == 24
         run: pnpm --filter facturas check:exports
 
       - name: Pack check

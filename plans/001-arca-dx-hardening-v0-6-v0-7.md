@@ -297,8 +297,9 @@ pnpm --filter facturas test -- src/errors.test.ts src/internal/http.test.ts src/
 
 **Out of scope**:
 
-- Any La Pyme source or database migration. La Pyme may add a small adapter in a
-  separate repository task after v0.7.0 is released.
+- Any La Pyme source change or database migration in this repository. Candidate
+  compatibility remains a separate repository task, but its pre-publication
+  gate is required below.
 - Live production ARCA calls.
 - WSFEX, CAEA, or new FCE capabilities.
 - A complete typed model for WSMTXCA authorization data.
@@ -1041,6 +1042,20 @@ The implementation must add or extend tests for:
 Use existing colocated Vitest files as the structural pattern. Avoid real ARCA
 network calls in automated tests.
 
+## Required La Pyme candidate compatibility gate
+
+Before v0.7.0 is declared ready for publication, test the exact packed candidate
+from a recorded `facturas` commit SHA in a disposable La Pyme branch or worktree.
+Follow the acceptance criteria in
+[LaPyme/lapyme#1353](https://github.com/LaPyme/lapyme/issues/1353), including
+canonical money inputs, one owner for authentication recovery, preservation of
+the exact one-attempt fiscal boundary, and focused consumer tests. Keep all La
+Pyme source changes outside this repository and do not make a production ARCA
+call or database migration for this gate.
+
+Re-run the compatibility gate against the final published artifact before La
+Pyme updates its exact dependency pin.
+
 ## Optional homologation acceptance gate
 
 This gate requires maintainer-provided homologation credentials and explicit
@@ -1083,6 +1098,8 @@ All criteria must hold:
 - [ ] `createNextVoucher()` remains available and is labeled single-writer.
 - [ ] README, package README, examples, declarations, runtime exports, and packed
       contents agree.
+- [ ] The exact packed v0.7.0 candidate passes the required La Pyme compatibility
+      gate from a recorded `facturas` commit SHA before publication readiness.
 - [ ] Every Changesets entry is present; package versions and changelogs were not
       edited manually by implementation PRs.
 - [ ] Final commands all exit 0:
@@ -1148,4 +1165,3 @@ Stop and report without improvising if:
 - A future review should decide the low-level factory surface, type WSMTXCA
   requests, add sanitized real SOAP fixtures, and revisit successful `raw`
   provider data. Those tasks must not delay this bounded program.
-
