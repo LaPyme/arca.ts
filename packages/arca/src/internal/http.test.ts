@@ -117,25 +117,60 @@ describe("postXml", () => {
   });
 
   it("keeps non-XML HTTP 500 responses as transport errors", async () => {
+    const responseBody = `upstream exploded\n<ns:Token>token-value</ns:Token><Sign>sign-value</Sign>${"x".repeat(5000)}`;
+    const log = vi.fn();
     vi.spyOn(https, "request").mockImplementation(
       createMockRequest({
         statusCode: 500,
         headers: { "content-type": "text/plain; charset=utf-8" },
-        responseBody: "upstream exploded",
+        responseBody,
       })
     );
 
-    await expect(
-      postXml({
-        url: "https://example.com/ws",
-        body: "<request />",
-        contentType: 'text/xml; charset="utf-8"',
-      })
-    ).rejects.toMatchObject({
+    const error = await postXml({
+      url: "https://example.com/ws",
+      body: "<request />",
+      contentType: 'text/xml; charset="utf-8"',
+      logger: createArcaLogger({ level: "error", log }),
+      service: "wsfe",
+      operation: "FEParamGetPtosVenta",
+    }).catch((caughtError: unknown) => caughtError);
+
+    expect(error).toMatchObject({
       name: "ArcaTransportError",
       statusCode: 500,
-      responseBody: "upstream exploded",
+      contentType: "text/plain; charset=utf-8",
+      responseBodyLength: responseBody.length,
     });
+    expect(error).not.toHaveProperty("responseBody");
+    expect((error as ArcaTransportError).responseBodyPreview).toHaveLength(
+      4096
+    );
+    expect((error as ArcaTransportError).responseBodyPreview).toContain(
+      "<ns:Token>[REDACTED]</ns:Token>"
+    );
+    expect((error as ArcaTransportError).responseBodyPreview).toContain(
+      "<Sign>[REDACTED]</Sign>"
+    );
+    expect(JSON.stringify(error)).not.toContain("token-value");
+    expect(JSON.stringify(error)).not.toContain("sign-value");
+    expect(log).toHaveBeenCalledWith(
+      "error",
+      "ARCA transport request failed",
+      expect.objectContaining({
+        service: "wsfe",
+        operation: "FEParamGetPtosVenta",
+        errorName: "ArcaTransportError",
+        errorCode: "ARCA_TRANSPORT_ERROR",
+        statusCode: 500,
+        responseBodyLength: responseBody.length,
+        responseBodyPreview: expect.any(String),
+      })
+    );
+    const loggerMetadata = log.mock.calls[0]?.[2];
+    expect(loggerMetadata).not.toHaveProperty("error");
+    expect(JSON.stringify(loggerMetadata)).not.toContain("token-value");
+    expect(JSON.stringify(loggerMetadata)).not.toContain("sign-value");
   });
 
   it("retries transport failures with a fixed delay", async () => {
@@ -205,6 +240,13 @@ describe("postXml", () => {
         attempts: 3,
       })
     );
+    for (const [, , metadata] of log.mock.calls) {
+      expect(metadata).not.toHaveProperty("error");
+      expect(metadata).toMatchObject({
+        errorName: "ArcaTransportError",
+        errorCode: "ARCA_TRANSPORT_ERROR",
+      });
+    }
     expect(log).toHaveBeenCalledWith(
       "warn",
       "Retrying ARCA request after transport failure (attempt 3/3)",
@@ -259,7 +301,8 @@ describe("postXml", () => {
     ).rejects.toMatchObject({
       name: "ArcaTransportError",
       statusCode: 200,
-      responseBody: "<partial",
+      responseBodyLength: 8,
+      responseBodyPreview: "<partial",
     });
   });
 
@@ -282,7 +325,8 @@ describe("postXml", () => {
       name: "ArcaTransportError",
       message: "ARCA HTTP response was aborted",
       statusCode: 200,
-      responseBody: "<partial",
+      responseBodyLength: 8,
+      responseBodyPreview: "<partial",
     });
   });
 
@@ -303,7 +347,8 @@ describe("postXml", () => {
       })
     ).rejects.toMatchObject({
       name: "ArcaTransportError",
-      message: "ARCA HTTP request failed: connection refused",
+      message: "ARCA HTTP request failed",
+      cause: expect.objectContaining({ message: "connection refused" }),
     });
   });
 

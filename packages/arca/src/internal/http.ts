@@ -1,6 +1,10 @@
 import https from "node:https";
 import { ArcaTransportError } from "../errors";
 import type { ArcaLogger } from "./logger";
+import {
+  createResponseBodyDiagnostic,
+  createSafeErrorDiagnostic,
+} from "./redaction";
 
 const defaultAgent = new https.Agent({
   keepAlive: true,
@@ -72,7 +76,7 @@ export async function postXmlWithMetadata({
           url,
           attempt,
           attempts: totalAttempts,
-          error,
+          ...createSafeErrorDiagnostic(error),
         });
         throw error;
       }
@@ -86,7 +90,7 @@ export async function postXmlWithMetadata({
           url,
           attempt: nextAttempt,
           attempts: totalAttempts,
-          error,
+          ...createSafeErrorDiagnostic(error),
         }
       );
       await delay(retryDelay);
@@ -158,14 +162,11 @@ async function postXmlOnce({
 
         response.on("error", (error) => {
           settleReject(
-            new ArcaTransportError(
-              `ARCA HTTP response stream failed: ${error.message}`,
-              {
-                cause: error,
-                statusCode: response.statusCode,
-                responseBody: getResponseBody(),
-              }
-            )
+            new ArcaTransportError("ARCA HTTP response stream failed", {
+              cause: error,
+              statusCode: response.statusCode,
+              ...createResponseBodyDiagnostic(getResponseBody()),
+            })
           );
         });
 
@@ -173,7 +174,7 @@ async function postXmlOnce({
           settleReject(
             new ArcaTransportError("ARCA HTTP response was aborted", {
               statusCode: response.statusCode,
-              responseBody: getResponseBody(),
+              ...createResponseBodyDiagnostic(getResponseBody()),
             })
           );
         });
@@ -214,7 +215,7 @@ async function postXmlOnce({
               {
                 statusCode,
                 contentType: responseContentType,
-                responseBody,
+                ...createResponseBodyDiagnostic(responseBody),
               }
             )
           );
@@ -223,14 +224,21 @@ async function postXmlOnce({
     );
 
     request.setTimeout(timeout, () => {
-      request.destroy(
-        new Error(`ARCA HTTP request timed out after ${timeout}ms`)
+      const timeoutCause = new Error(
+        `ARCA HTTP request timed out after ${timeout}ms`
       );
+      settleReject(
+        new ArcaTransportError(
+          `ARCA HTTP request timed out after ${timeout}ms`,
+          { cause: timeoutCause }
+        )
+      );
+      request.destroy(timeoutCause);
     });
 
     request.on("error", (error) => {
       settleReject(
-        new ArcaTransportError(`ARCA HTTP request failed: ${error.message}`, {
+        new ArcaTransportError("ARCA HTTP request failed", {
           cause: error,
         })
       );

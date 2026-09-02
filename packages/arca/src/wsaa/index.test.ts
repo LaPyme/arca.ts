@@ -1,5 +1,6 @@
 import forge from "node-forge";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createArcaLogger } from "../internal/logger";
 import type {
   ArcaWsaaSessionKey,
   ArcaWsaaSessionStore,
@@ -68,13 +69,18 @@ function createWsaaSoapResponse(loginCmsReturnXml?: string) {
 </soap:Envelope>`;
 }
 
-function createSoapFaultResponse(faultCode: string, faultMessage: string) {
+function createSoapFaultResponse(
+  faultCode: string,
+  faultMessage: string,
+  faultDetail = ""
+) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
   <soap:Body>
     <soap:Fault>
       <faultcode>${faultCode}</faultcode>
       <faultstring>${faultMessage}</faultstring>
+      ${faultDetail}
     </soap:Fault>
   </soap:Body>
 </soap:Envelope>`;
@@ -482,6 +488,51 @@ describe("createWsaaAuthModule", () => {
       name: "ArcaConfigurationError",
       message: expect.stringContaining("durable wsaaSessionStore"),
     });
+  });
+
+  it("logs WSAA faults without the Error instance or parsed fault detail", async () => {
+    const log = vi.fn();
+    mockPostXml.mockResolvedValueOnce(
+      createHttpResponse(
+        createSoapFaultResponse(
+          "soap:Server",
+          "Rejected",
+          "<detail><Token>token-value</Token><Sign>sign-value</Sign></detail>"
+        )
+      )
+    );
+
+    const { createWsaaAuthModule } = await loadWsaaModule();
+    const auth = createWsaaAuthModule({
+      config: createWsaaConfig(),
+      logger: createArcaLogger({ level: "error", log }),
+    });
+    const error = await auth
+      .login("wsfe")
+      .catch((caughtError: unknown) => caughtError);
+
+    expect(error).toMatchObject({
+      name: "ArcaSoapFaultError",
+      code: "ARCA_SOAP_FAULT",
+      faultCode: "soap:Server",
+    });
+    expect(error).not.toHaveProperty("detail");
+    expect(JSON.stringify(error)).not.toMatch(/token-value|sign-value/);
+    expect(log).toHaveBeenCalledWith(
+      "error",
+      "WSAA SOAP fault response",
+      expect.objectContaining({
+        service: "wsfe",
+        operation: "loginCms",
+        errorName: "ArcaSoapFaultError",
+        errorCode: "ARCA_SOAP_FAULT",
+        faultCode: "soap:Server",
+      })
+    );
+    expect(log.mock.calls[0]?.[2]).not.toHaveProperty("error");
+    expect(JSON.stringify(log.mock.calls[0]?.[2])).not.toMatch(
+      /token-value|sign-value/
+    );
   });
 
   it("ignores expired durable credentials and replaces them after WSAA succeeds", async () => {

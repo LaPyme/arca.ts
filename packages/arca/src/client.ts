@@ -1,15 +1,24 @@
 import { assertArcaClientConfig, normalizeArcaClientConfig } from "./config";
 import { createArcaLogger } from "./internal/logger";
-import type { ArcaClientConfig } from "./internal/types";
+import type { ArcaClientConfig, ArcaEnvironment } from "./internal/types";
 import { createPadronService, type PadronService } from "./services/padron";
 import { createWsfeService, type WsfeService } from "./services/wsfe";
 import { createWsmtxcaService, type WsmtxcaService } from "./services/wsmtxca";
 import { createSoapTransport } from "./soap";
 import { createWsaaAuthModule } from "./wsaa";
 
+/** Immutable, credential-free operational view of an ARCA client configuration. */
+export type ArcaClientConfigView = Readonly<{
+  taxId: string;
+  environment: ArcaEnvironment;
+  timeout?: number;
+  retries?: number;
+  retryDelay?: number;
+}>;
+
 /** Fully wired ARCA client with access to all service modules. */
 export type ArcaClient = {
-  config: ArcaClientConfig;
+  readonly config: ArcaClientConfigView;
   wsfe: WsfeService;
   wsmtxca: WsmtxcaService;
   padron: PadronService;
@@ -29,9 +38,16 @@ export function createArcaClient(config: ArcaClientConfig): ArcaClient {
 
   const auth = createWsaaAuthModule({ config: normalizedConfig, logger });
   const soap = createSoapTransport({ config: normalizedConfig, logger });
+  const publicConfig = Object.freeze({
+    taxId: normalizedConfig.taxId,
+    environment: normalizedConfig.environment,
+    timeout: normalizedConfig.timeout,
+    retries: normalizedConfig.retries,
+    retryDelay: normalizedConfig.retryDelay,
+  });
 
   return {
-    config: normalizedConfig,
+    config: publicConfig,
     wsfe: createWsfeService({ config: normalizedConfig, auth, soap }),
     wsmtxca: createWsmtxcaService({ config: normalizedConfig, auth, soap }),
     padron: createPadronService({ config: normalizedConfig, auth, soap }),

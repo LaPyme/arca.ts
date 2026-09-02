@@ -266,14 +266,13 @@ export function createWsmtxcaService(
       return { voucherNumber: 0, raw };
     }
     if (errors.length > 0) {
-      throw createWsmtxcaServiceError(operation, raw, errors);
+      throw createWsmtxcaServiceError(operation, errors);
     }
 
     return {
       voucherNumber: parseWsmtxcaVoucherNumber(
         raw.numeroComprobante ?? raw.cbteNro ?? raw.nroComprobante,
         "WSMTXCA did not return the last authorized voucher number",
-        raw,
         true
       ),
       raw,
@@ -355,7 +354,7 @@ export function createWsmtxcaService(
       };
     }
     if (errors.length > 0) {
-      throw createWsmtxcaServiceError(operation, raw, errors);
+      throw createWsmtxcaServiceError(operation, errors);
     }
 
     const voucher = extractWsmtxcaVoucherPayload(raw);
@@ -366,7 +365,6 @@ export function createWsmtxcaService(
           service: "wsmtxca",
           operation,
           issues: observations,
-          detail: raw,
         }
       );
     }
@@ -390,11 +388,7 @@ export function createWsmtxcaService(
   }): Promise<WsmtxcaVoucherLookupResult> {
     const lookup = await lookupVoucher(input);
     if (lookup.kind === "not_found") {
-      throw createWsmtxcaServiceError(
-        lookup.operation,
-        lookup.raw,
-        lookup.errors
-      );
+      throw createWsmtxcaServiceError(lookup.operation, lookup.errors);
     }
 
     const invoiceDate = lookup.voucher.invoiceDate;
@@ -406,7 +400,6 @@ export function createWsmtxcaService(
           service: "wsmtxca",
           operation: lookup.operation,
           issues: lookup.observations,
-          detail: lookup.raw,
         }
       );
     }
@@ -638,7 +631,6 @@ function createWsmtxcaOutcomeError(
         ? { cae: outcome.cae }
         : {}),
       issues,
-      detail: outcome.raw,
     }
   );
 }
@@ -651,7 +643,6 @@ function createWsmtxcaResults(operationResult?: string) {
 
 function createWsmtxcaServiceError(
   operation: string,
-  raw: Record<string, unknown>,
   issues: ArcaFiscalIssue[]
 ) {
   const firstIssue = issues[0];
@@ -665,7 +656,6 @@ function createWsmtxcaServiceError(
         ? {}
         : { serviceCode: firstIssue.code }),
       issues,
-      detail: raw,
     }
   );
 }
@@ -835,14 +825,12 @@ function sumWsmtxcaVatAmounts(value: unknown): number | undefined {
 function parseWsmtxcaVoucherNumber(
   value: unknown,
   message: string,
-  detail: Record<string, unknown>,
   allowZero = false
 ) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || (allowZero ? parsed < 0 : parsed <= 0)) {
     throw new ArcaServiceError(message, {
       service: "wsmtxca",
-      detail,
     });
   }
   return parsed;

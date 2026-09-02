@@ -23,7 +23,8 @@ describe("errors", () => {
       cause,
       statusCode: 500,
       contentType: "text/xml",
-      responseBody: "<fault />",
+      responseBodyLength: 9,
+      responseBodyPreview: "<fault />",
     });
     const invalidSoapResponse = new ArcaInvalidSoapResponseError(
       "invalid soap",
@@ -36,13 +37,11 @@ describe("errors", () => {
         contentType: "text/html",
         responseBodyLength: 42,
         responseBodyPreview: "<html />",
-        parsedDetail: { html: true },
       }
     );
     const soapFault = new ArcaSoapFaultError("soap", {
       cause,
       faultCode: "soap:Server",
-      detail: { reason: "bad" },
     });
     const serviceError = new ArcaServiceError("service", {
       cause,
@@ -62,7 +61,6 @@ describe("errors", () => {
           message: "Fecha inválida",
         },
       ],
-      detail: { field: "CbteTipo" },
     });
 
     expect(baseError).toMatchObject({
@@ -85,7 +83,8 @@ describe("errors", () => {
       code: "ARCA_TRANSPORT_ERROR",
       statusCode: 500,
       contentType: "text/xml",
-      responseBody: "<fault />",
+      responseBodyLength: 9,
+      responseBodyPreview: "<fault />",
     });
     expect(invalidSoapResponse).toMatchObject({
       name: "ArcaInvalidSoapResponseError",
@@ -97,13 +96,11 @@ describe("errors", () => {
       contentType: "text/html",
       responseBodyLength: 42,
       responseBodyPreview: "<html />",
-      parsedDetail: { html: true },
     });
     expect(soapFault).toMatchObject({
       name: "ArcaSoapFaultError",
       code: "ARCA_SOAP_FAULT",
       faultCode: "soap:Server",
-      detail: { reason: "bad" },
     });
     expect(serviceError).toMatchObject({
       name: "ArcaServiceError",
@@ -124,7 +121,46 @@ describe("errors", () => {
           message: "Fecha inválida",
         },
       ],
-      detail: { field: "CbteTipo" },
     });
+  });
+
+  it("bounds and redacts every public response preview", () => {
+    const sensitiveBody = `<ns:Token audience="private">token-value</ns:Token><Sign>sign-value</Sign>${"x".repeat(5000)}`;
+    const transportError = new ArcaTransportError("transport", {
+      responseBodyLength: sensitiveBody.length,
+      responseBodyPreview: sensitiveBody,
+    });
+    const invalidSoapResponse = new ArcaInvalidSoapResponseError(
+      "invalid soap",
+      {
+        responseBodyLength: sensitiveBody.length,
+        responseBodyPreview: sensitiveBody,
+      }
+    );
+
+    for (const error of [transportError, invalidSoapResponse]) {
+      expect(error.responseBodyPreview).toHaveLength(4096);
+      expect(error.responseBodyPreview).toContain(
+        "<ns:Token>[REDACTED]</ns:Token>"
+      );
+      expect(error.responseBodyPreview).toContain("<Sign>[REDACTED]</Sign>");
+      expect(JSON.stringify(error)).not.toContain("token-value");
+      expect(JSON.stringify(error)).not.toContain("sign-value");
+    }
+
+    expect(transportError).not.toHaveProperty("responseBody");
+    expect(invalidSoapResponse).not.toHaveProperty("parsedDetail");
+
+    const soapFault = new ArcaSoapFaultError(
+      `<Token>token-value</Token><Sign>sign-value</Sign>${"x".repeat(5000)}`,
+      { faultCode: "<Token>fault-code-token</Token>" }
+    );
+    expect(soapFault.message).toHaveLength(4096);
+    expect(soapFault.message).toContain("<Token>[REDACTED]</Token>");
+    expect(soapFault.message).toContain("<Sign>[REDACTED]</Sign>");
+    expect(soapFault.faultCode).toBe("<Token>[REDACTED]</Token>");
+    expect(JSON.stringify(soapFault)).not.toMatch(
+      /token-value|sign-value|fault-code-token/
+    );
   });
 });

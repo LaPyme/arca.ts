@@ -1,4 +1,4 @@
-export type { ArcaClient } from "./client";
+export type { ArcaClient, ArcaClientConfigView } from "./client";
 // biome-ignore lint/performance/noBarrelFile: package entrypoint re-exports runtime client factory
 export { createArcaClient } from "./client";
 export type { CreateArcaClientConfigFromEnvOptions } from "./config";

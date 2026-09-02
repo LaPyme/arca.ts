@@ -84,36 +84,55 @@ describe("xml helpers", () => {
         faultCode: "soap12:Sender",
       })
     );
+
+    const faultWithSecret = (() => {
+      try {
+        return parseSoapBody(
+          '<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><soap:Fault><faultcode>soap:Server</faultcode><faultstring>No existe</faultstring><detail><Token>token-value</Token><Sign>sign-value</Sign></detail></soap:Fault></soap:Body></soap:Envelope>'
+        );
+      } catch (caughtError) {
+        return caughtError;
+      }
+    })();
+
+    expect(faultWithSecret).not.toHaveProperty("detail");
+    expect(JSON.stringify(faultWithSecret)).not.toMatch(
+      /token-value|sign-value/
+    );
   });
 
   it("rejects malformed SOAP responses and multiple body entries", () => {
-    expect(() =>
-      parseSoapBody(
-        "<Envelope><Token>secret</Token><Sign>sig</Sign></Envelope>",
-        {
+    const responseBody =
+      "<Envelope><wsaa:Token>secret</wsaa:Token><Sign>sig</Sign></Envelope>";
+    const error = (() => {
+      try {
+        return parseSoapBody(responseBody, {
           service: "wsfe",
           operation: "FECompConsultar",
           endpointUrl: "https://example.com/ws",
           statusCode: 200,
           contentType: "text/xml",
-          responseBody:
-            "<Envelope><Token>secret</Token><Sign>sig</Sign></Envelope>",
-        }
-      )
-    ).toThrowError(
-      expect.objectContaining<Partial<ArcaInvalidSoapResponseError>>({
-        name: "ArcaInvalidSoapResponseError",
-        message: "Invalid SOAP response: missing body",
-        service: "wsfe",
-        operation: "FECompConsultar",
-        endpointUrl: "https://example.com/ws",
-        statusCode: 200,
-        contentType: "text/xml",
-        responseBodyLength: 58,
-        responseBodyPreview:
-          "<Envelope><Token>[REDACTED]</Token><Sign>[REDACTED]</Sign></Envelope>",
-      })
-    );
+          responseBody,
+        });
+      } catch (caughtError) {
+        return caughtError;
+      }
+    })();
+
+    expect(error).toMatchObject<Partial<ArcaInvalidSoapResponseError>>({
+      name: "ArcaInvalidSoapResponseError",
+      message: "Invalid SOAP response: missing body",
+      service: "wsfe",
+      operation: "FECompConsultar",
+      endpointUrl: "https://example.com/ws",
+      statusCode: 200,
+      contentType: "text/xml",
+      responseBodyLength: responseBody.length,
+      responseBodyPreview:
+        "<Envelope><wsaa:Token>[REDACTED]</wsaa:Token><Sign>[REDACTED]</Sign></Envelope>",
+    });
+    expect(error).not.toHaveProperty("parsedDetail");
+    expect(JSON.stringify(error)).not.toMatch(/secret|sig/);
 
     expect(() =>
       getSingleBodyEntry({

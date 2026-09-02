@@ -518,7 +518,6 @@ export function createWsfeService(
           ...execution.outcome.errors,
           ...execution.outcome.observations,
         ],
-        detail: raw,
       });
     }
 
@@ -615,7 +614,7 @@ export function createWsfeService(
     }
 
     if (errors.length > 0) {
-      throw createWsfeServiceError(operation, result, errors);
+      throw createWsfeServiceError(operation, errors);
     }
 
     const raw = toWsfeRecord(result.ResultGet);
@@ -623,7 +622,6 @@ export function createWsfeService(
       throw new ArcaServiceError("WSFE did not return the consulted voucher", {
         service: "wsfe",
         operation,
-        detail: result,
       });
     }
 
@@ -1203,7 +1201,7 @@ function throwForWsfeOperationErrors(
 ) {
   const errors = extractWsfeGlobalIssues(result, operation);
   if (errors.length > 0) {
-    throw createWsfeServiceError(operation, result, errors);
+    throw createWsfeServiceError(operation, errors);
   }
 }
 
@@ -1453,15 +1451,10 @@ function createWsfeOutcomeError(
       ? { cae: outcome.cae }
       : {}),
     issues,
-    detail: outcome.raw,
   });
 }
 
-function createWsfeServiceError(
-  operation: string,
-  result: Record<string, unknown>,
-  issues: ArcaFiscalIssue[]
-) {
+function createWsfeServiceError(operation: string, issues: ArcaFiscalIssue[]) {
   const firstIssue = issues[0];
   return new ArcaServiceError(
     firstIssue ? formatWsfeIssue(firstIssue) : "WSFE returned a service error",
@@ -1472,7 +1465,6 @@ function createWsfeServiceError(
         ? {}
         : { serviceCode: firstIssue.code }),
       issues,
-      detail: result,
     }
   );
 }

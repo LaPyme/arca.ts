@@ -6,6 +6,7 @@ vi.mock("../internal/http", () => ({
   postXmlWithMetadata: mockPostXml,
 }));
 
+import { createArcaLogger } from "../internal/logger";
 import { createSoapTransport } from "./index";
 
 afterEach(() => {
@@ -129,8 +130,11 @@ describe("createSoapTransport", () => {
   });
 
   it("throws invalid SOAP response errors with HTTP metadata and sanitized previews", async () => {
+    const log = vi.fn();
+    const responseBody =
+      "<html><body><Token>secret-token</Token><Sign>secret-sign</Sign></body></html>";
     mockPostXml.mockResolvedValueOnce({
-      body: "<html><body><Token>secret-token</Token><Sign>secret-sign</Sign></body></html>",
+      body: responseBody,
       statusCode: 200,
       contentType: "text/html; charset=utf-8",
     });
@@ -142,15 +146,18 @@ describe("createSoapTransport", () => {
         privateKeyPem: "key",
         environment: "production",
       },
+      logger: createArcaLogger({ level: "error", log }),
     });
 
-    await expect(
-      transport.execute({
+    const error = await transport
+      .execute({
         service: "wsfe",
         operation: "FEParamGetPtosVenta",
         body: {},
       })
-    ).rejects.toMatchObject({
+      .catch((caughtError: unknown) => caughtError);
+
+    expect(error).toMatchObject({
       name: "ArcaInvalidSoapResponseError",
       service: "wsfe",
       operation: "FEParamGetPtosVenta",
@@ -160,5 +167,76 @@ describe("createSoapTransport", () => {
       responseBodyPreview:
         "<html><body><Token>[REDACTED]</Token><Sign>[REDACTED]</Sign></body></html>",
     });
+    expect(error).not.toHaveProperty("parsedDetail");
+    expect(JSON.stringify(error)).not.toMatch(/secret-token|secret-sign/);
+    expect(log).toHaveBeenCalledWith(
+      "error",
+      "ARCA invalid SOAP response",
+      expect.objectContaining({
+        service: "wsfe",
+        operation: "FEParamGetPtosVenta",
+        errorName: "ArcaInvalidSoapResponseError",
+        errorCode: "ARCA_INVALID_SOAP_RESPONSE",
+        statusCode: 200,
+        responseBodyLength: responseBody.length,
+        responseBodyPreview:
+          "<html><body><Token>[REDACTED]</Token><Sign>[REDACTED]</Sign></body></html>",
+      })
+    );
+    const loggerMetadata = log.mock.calls[0]?.[2];
+    expect(loggerMetadata).not.toHaveProperty("error");
+    expect(JSON.stringify(loggerMetadata)).not.toMatch(
+      /secret-token|secret-sign/
+    );
+  });
+
+  it("omits parsed SOAP fault trees from errors and logger metadata", async () => {
+    const log = vi.fn();
+    mockPostXml.mockResolvedValueOnce({
+      body: '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><soap:Fault><faultcode>soap:Server</faultcode><faultstring>Rejected</faultstring><detail><ns:Token xmlns:ns="urn:test">token-value</ns:Token><Sign>sign-value</Sign></detail></soap:Fault></soap:Body></soap:Envelope>',
+      statusCode: 500,
+      contentType: "text/xml; charset=utf-8",
+    });
+
+    const transport = createSoapTransport({
+      config: {
+        taxId: "20123456789",
+        certificatePem: "cert",
+        privateKeyPem: "key",
+        environment: "production",
+      },
+      logger: createArcaLogger({ level: "error", log }),
+    });
+
+    const error = await transport
+      .execute({
+        service: "wsfe",
+        operation: "FEParamGetPtosVenta",
+        body: {},
+      })
+      .catch((caughtError: unknown) => caughtError);
+
+    expect(error).toMatchObject({
+      name: "ArcaSoapFaultError",
+      code: "ARCA_SOAP_FAULT",
+      faultCode: "soap:Server",
+    });
+    expect(error).not.toHaveProperty("detail");
+    expect(JSON.stringify(error)).not.toMatch(/token-value|sign-value/);
+    expect(log).toHaveBeenCalledWith(
+      "error",
+      "ARCA SOAP fault response",
+      expect.objectContaining({
+        service: "wsfe",
+        operation: "FEParamGetPtosVenta",
+        errorName: "ArcaSoapFaultError",
+        errorCode: "ARCA_SOAP_FAULT",
+        faultCode: "soap:Server",
+      })
+    );
+    expect(log.mock.calls[0]?.[2]).not.toHaveProperty("error");
+    expect(JSON.stringify(log.mock.calls[0]?.[2])).not.toMatch(
+      /token-value|sign-value/
+    );
   });
 });

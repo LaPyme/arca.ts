@@ -1,6 +1,7 @@
 import { XMLBuilder, XMLParser } from "fast-xml-parser";
 import { ArcaInvalidSoapResponseError, ArcaSoapFaultError } from "../errors";
 import type { ArcaServiceName, ArcaSoapVersion } from "../internal/types";
+import { createResponseBodyDiagnostic } from "./redaction";
 
 const xmlBuilder = new XMLBuilder({
   attributeNamePrefix: "@_",
@@ -79,7 +80,6 @@ export function parseSoapBody(
     throw createInvalidSoapResponseError(
       "Invalid SOAP response: XML parse failed",
       context,
-      undefined,
       error instanceof Error ? error : undefined
     );
   }
@@ -90,8 +90,7 @@ export function parseSoapBody(
   if (!body) {
     throw createInvalidSoapResponseError(
       "Invalid SOAP response: missing body",
-      context,
-      parsed
+      context
     );
   }
 
@@ -111,8 +110,7 @@ export function getSingleBodyEntry<T = unknown>(
   if (entries.length !== 1) {
     throw createInvalidSoapResponseError(
       `Invalid SOAP response: expected a single body entry, got ${entries.length}`,
-      context,
-      body
+      context
     );
   }
 
@@ -122,7 +120,6 @@ export function getSingleBodyEntry<T = unknown>(
 function createInvalidSoapResponseError(
   message: string,
   context: ArcaSoapParseContext,
-  parsedDetail?: unknown,
   cause?: Error
 ): ArcaInvalidSoapResponseError {
   const responseBody = context.responseBody ?? "";
@@ -134,26 +131,11 @@ function createInvalidSoapResponseError(
     endpointUrl: context.endpointUrl,
     statusCode: context.statusCode,
     contentType: context.contentType,
-    responseBodyLength: responseBody.length,
-    responseBodyPreview: sanitizeSoapResponsePreview(
+    ...createResponseBodyDiagnostic(
       responseBody,
       context.responseBodyPreviewLength
     ),
-    parsedDetail,
   });
-}
-
-function sanitizeSoapResponsePreview(
-  responseBody: string,
-  maxLength = 4096
-): string {
-  return responseBody
-    .replace(
-      /<((?:[A-Za-z_][\w.-]*:)?(?:Token|Sign))\b([^>]*)>[\s\S]*?<\/\1>/gi,
-      (_match, tagName: string, attributes: string) =>
-        `<${tagName}${attributes}>[REDACTED]</${tagName}>`
-    )
-    .slice(0, maxLength);
 }
 
 export function parseXmlDocument<T = unknown>(xml: string): T {
@@ -192,7 +174,6 @@ function createSoapFaultError(
 
   return new ArcaSoapFaultError(message, {
     faultCode: faultCode ?? undefined,
-    detail: fault,
   });
 }
 
