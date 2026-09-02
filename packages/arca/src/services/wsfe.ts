@@ -5,6 +5,13 @@ import {
   ArcaSoapFaultError,
   ArcaTransportError,
 } from "../errors";
+import {
+  isWithinArcaTolerance,
+  normalizeArcaAmountToMinorUnits,
+  serializeArcaAmount,
+  serializeArcaExchangeRate,
+  serializeArcaPercentage,
+} from "../internal/decimal";
 import type { ArcaClientConfig, ArcaRepresentedTaxId } from "../internal/types";
 import type { SoapTransport } from "../soap";
 import type { WsaaAuthModule } from "../wsaa";
@@ -77,7 +84,7 @@ export type WsfeVoucherInput = {
   concept: number;
   documentType: number;
   documentNumber: number;
-  receiverVatConditionId?: number;
+  receiverVatConditionId: number;
   voucherDate: WsfeDateInput;
   totalAmount: number;
   nonTaxableAmount: number;
@@ -86,7 +93,7 @@ export type WsfeVoucherInput = {
   taxAmount: number;
   vatAmount: number;
   currencyId: string;
-  exchangeRate?: number;
+  exchangeRate?: number | string;
   sameCurrencyForeignCancellation?: "S" | "N";
   serviceStartDate?: WsfeDateInput;
   serviceEndDate?: WsfeDateInput;
@@ -245,7 +252,7 @@ export type WsfeService = {
     representedTaxId?: number | string;
     forceRefresh?: boolean;
   }): Promise<WsfeCatalogEntry[]>;
-  /** Lists supported currency types. */
+  /** Lists live ARCA currency identifiers such as PES and DOL, not ISO codes. */
   getCurrencyTypes(input: {
     representedTaxId?: number | string;
     forceRefresh?: boolean;
@@ -320,6 +327,17 @@ type NormalizedWsfeAssociatedPeriod = {
   endDate: string;
 };
 
+type NormalizedWsfeTax = Omit<WsfeTax, "baseAmount" | "rate" | "amount"> & {
+  baseAmount: string;
+  rate: string;
+  amount: string;
+};
+
+type NormalizedWsfeVatRate = Omit<WsfeVatRate, "baseAmount" | "amount"> & {
+  baseAmount: string;
+  amount: string;
+};
+
 type NormalizedWsfeVoucherInput = Omit<
   WsfeVoucherInput,
   | "voucherDate"
@@ -328,13 +346,31 @@ type NormalizedWsfeVoucherInput = Omit<
   | "paymentDueDate"
   | "associatedVouchers"
   | "associatedPeriod"
+  | "totalAmount"
+  | "nonTaxableAmount"
+  | "netAmount"
+  | "exemptAmount"
+  | "taxAmount"
+  | "vatAmount"
+  | "exchangeRate"
+  | "taxes"
+  | "vatRates"
 > & {
   voucherDate: string;
+  totalAmount: string;
+  nonTaxableAmount: string;
+  netAmount: string;
+  exemptAmount: string;
+  taxAmount: string;
+  vatAmount: string;
+  exchangeRate?: string;
   serviceStartDate?: string;
   serviceEndDate?: string;
   paymentDueDate?: string;
   associatedVouchers?: NormalizedWsfeAssociatedVoucher[];
   associatedPeriod?: NormalizedWsfeAssociatedPeriod;
+  taxes?: NormalizedWsfeTax[];
+  vatRates?: NormalizedWsfeVatRate[];
 };
 
 /** Creates a WSFE service instance wired with authentication and SOAP transport. */
@@ -779,16 +815,13 @@ function mapWsfeVoucherInput(
     ImpTrib: input.taxAmount,
     ImpIVA: input.vatAmount,
     MonId: input.currencyId,
+    CondicionIVAReceptorId: input.receiverVatConditionId,
     PtoVta: input.salesPoint,
     CbteTipo: input.voucherType,
   };
 
   if (input.exchangeRate !== undefined) {
     data.MonCotiz = input.exchangeRate;
-  }
-
-  if (input.receiverVatConditionId !== undefined) {
-    data.CondicionIVAReceptorId = input.receiverVatConditionId;
   }
 
   if (
@@ -882,6 +915,14 @@ function mapWsfeVoucherInput(
 function normalizeWsfeVoucherInput(
   input: WsfeVoucherInput
 ): NormalizedWsfeVoucherInput {
+  if (input.receiverVatConditionId === undefined) {
+    throw new ArcaInputError("receiverVatConditionId is required.", {
+      code: "ARCA_INPUT_MISSING_FIELD",
+      field: "receiverVatConditionId",
+      expected: "a receiver VAT condition accepted for the voucher class",
+    });
+  }
+
   const {
     voucherDate,
     exchangeRate,
@@ -890,12 +931,16 @@ function normalizeWsfeVoucherInput(
     paymentDueDate,
     associatedVouchers,
     associatedPeriod,
+    taxes,
+    vatRates,
     ...rest
   } = input;
   const normalizedExchangeRate = normalizeWsfeExchangeRate(input, exchangeRate);
+  const normalizedAmounts = normalizeAndValidateWsfeAmounts(input);
 
   return {
     ...rest,
+    ...normalizedAmounts,
     voucherDate: normalizeWsfeDateInput(voucherDate, "voucherDate"),
     ...(normalizedExchangeRate === undefined
       ? {}
@@ -958,7 +1003,202 @@ function normalizeWsfeVoucherInput(
             ),
           },
         }),
+    ...(taxes === undefined
+      ? {}
+      : {
+          taxes: taxes.map((tax, index) => ({
+            ...tax,
+            baseAmount: serializeArcaAmount(
+              tax.baseAmount,
+              `taxes[${index}].baseAmount`
+            ),
+            rate: serializeArcaPercentage(tax.rate, `taxes[${index}].rate`),
+            amount: serializeArcaAmount(tax.amount, `taxes[${index}].amount`),
+          })),
+        }),
+    ...(vatRates === undefined
+      ? {}
+      : {
+          vatRates: vatRates.map((vatRate, index) => ({
+            ...vatRate,
+            baseAmount: serializeArcaAmount(
+              vatRate.baseAmount,
+              `vatRates[${index}].baseAmount`
+            ),
+            amount: serializeArcaAmount(
+              vatRate.amount,
+              `vatRates[${index}].amount`
+            ),
+          })),
+        }),
   };
+}
+
+function normalizeAndValidateWsfeAmounts(
+  input: WsfeVoucherInput
+): Pick<
+  NormalizedWsfeVoucherInput,
+  | "totalAmount"
+  | "nonTaxableAmount"
+  | "netAmount"
+  | "exemptAmount"
+  | "taxAmount"
+  | "vatAmount"
+> {
+  const totalAmount = normalizeArcaAmountToMinorUnits(
+    input.totalAmount,
+    "totalAmount"
+  );
+  const nonTaxableAmount = normalizeArcaAmountToMinorUnits(
+    input.nonTaxableAmount,
+    "nonTaxableAmount"
+  );
+  const netAmount = normalizeArcaAmountToMinorUnits(
+    input.netAmount,
+    "netAmount"
+  );
+  const exemptAmount = normalizeArcaAmountToMinorUnits(
+    input.exemptAmount,
+    "exemptAmount"
+  );
+  const taxAmount = normalizeArcaAmountToMinorUnits(
+    input.taxAmount,
+    "taxAmount"
+  );
+  const vatAmount = normalizeArcaAmountToMinorUnits(
+    input.vatAmount,
+    "vatAmount"
+  );
+
+  const decomposedTotal =
+    nonTaxableAmount + netAmount + exemptAmount + taxAmount + vatAmount;
+  assertWsfeAmountMatch(
+    totalAmount,
+    decomposedTotal,
+    "totalAmount",
+    "the sum of nonTaxableAmount, netAmount, exemptAmount, taxAmount, and vatAmount"
+  );
+
+  const vatRates = input.vatRates ?? [];
+  if (vatAmount > 0n && vatRates.length === 0) {
+    throw new ArcaInputError(
+      "vatRates is required when vatAmount is greater than zero.",
+      {
+        code: "ARCA_INPUT_MISSING_FIELD",
+        field: "vatRates",
+        expected: "VAT detail whose amounts reconcile with vatAmount",
+      }
+    );
+  }
+
+  if (vatRates.length > 0) {
+    const normalizedVatRates = vatRates.map((vatRate, index) => ({
+      baseAmount: normalizeArcaAmountToMinorUnits(
+        vatRate.baseAmount,
+        `vatRates[${index}].baseAmount`
+      ),
+      amount: normalizeArcaAmountToMinorUnits(
+        vatRate.amount,
+        `vatRates[${index}].amount`
+      ),
+    }));
+    const vatRateAmountSum = normalizedVatRates.reduce(
+      (sum, vatRate) => sum + vatRate.amount,
+      0n
+    );
+    const vatRateBaseSum = normalizedVatRates.reduce(
+      (sum, vatRate) => sum + vatRate.baseAmount,
+      0n
+    );
+
+    assertWsfeAmountMatch(
+      vatAmount,
+      vatRateAmountSum,
+      "vatAmount",
+      "the sum of vatRates[].amount",
+      vatRates.length
+    );
+    if (requiresWsfeVatBaseReconciliation(input.voucherType)) {
+      assertWsfeAmountMatch(
+        netAmount,
+        vatRateBaseSum,
+        "netAmount",
+        "the sum of vatRates[].baseAmount",
+        vatRates.length
+      );
+    }
+  }
+
+  const taxes = input.taxes ?? [];
+  if (taxAmount > 0n && taxes.length === 0) {
+    throw new ArcaInputError(
+      "taxes is required when taxAmount is greater than zero.",
+      {
+        code: "ARCA_INPUT_MISSING_FIELD",
+        field: "taxes",
+        expected: "tax detail whose amounts reconcile with taxAmount",
+      }
+    );
+  }
+
+  if (taxes.length > 0) {
+    const taxAmountSum = taxes.reduce((sum, tax, index) => {
+      normalizeArcaAmountToMinorUnits(
+        tax.baseAmount,
+        `taxes[${index}].baseAmount`
+      );
+      serializeArcaPercentage(tax.rate, `taxes[${index}].rate`);
+      return (
+        sum +
+        normalizeArcaAmountToMinorUnits(tax.amount, `taxes[${index}].amount`)
+      );
+    }, 0n);
+
+    assertWsfeAmountMatch(
+      taxAmount,
+      taxAmountSum,
+      "taxAmount",
+      "the sum of taxes[].amount",
+      taxes.length
+    );
+  }
+
+  return {
+    totalAmount: serializeArcaAmount(input.totalAmount, "totalAmount"),
+    nonTaxableAmount: serializeArcaAmount(
+      input.nonTaxableAmount,
+      "nonTaxableAmount"
+    ),
+    netAmount: serializeArcaAmount(input.netAmount, "netAmount"),
+    exemptAmount: serializeArcaAmount(input.exemptAmount, "exemptAmount"),
+    taxAmount: serializeArcaAmount(input.taxAmount, "taxAmount"),
+    vatAmount: serializeArcaAmount(input.vatAmount, "vatAmount"),
+  };
+}
+
+function requiresWsfeVatBaseReconciliation(voucherType: number): boolean {
+  // WSFE validation 10061 exempts debit/credit notes, class C vouchers,
+  // and class A vouchers with the retention legend.
+  return ![2, 3, 7, 8, 11, 12, 13, 15, 52, 53].includes(voucherType);
+}
+
+function assertWsfeAmountMatch(
+  actual: bigint,
+  expectedAmount: bigint,
+  field: string,
+  expectedDescription: string,
+  absoluteCentAllowance = 1
+) {
+  if (!isWithinArcaTolerance(actual, expectedAmount, absoluteCentAllowance)) {
+    throw new ArcaInputError(
+      `${field} does not reconcile within ARCA's documented tolerance.`,
+      {
+        code: "ARCA_INPUT_AMOUNT_MISMATCH",
+        field,
+        expected: `within ARCA tolerance of ${expectedDescription}`,
+      }
+    );
+  }
 }
 
 function normalizeWsfeExchangeRate(
@@ -966,15 +1206,23 @@ function normalizeWsfeExchangeRate(
     WsfeVoucherInput,
     "currencyId" | "sameCurrencyForeignCancellation"
   >,
-  exchangeRate: number | undefined
-): number | undefined {
+  exchangeRate: number | string | undefined
+): string | undefined {
   if (input.currencyId === "PES") {
-    if (exchangeRate !== undefined && exchangeRate !== 1) {
+    if (
+      exchangeRate !== undefined &&
+      serializeArcaExchangeRate(exchangeRate, "exchangeRate") !== "1"
+    ) {
       throw new ArcaInputError(
-        "exchangeRate must be 1 when currencyId is PES."
+        "exchangeRate must be 1 when currencyId is PES.",
+        {
+          code: "ARCA_INPUT_INVALID_EXCHANGE_RATE",
+          field: "exchangeRate",
+          expected: "1 when currencyId is PES",
+        }
       );
     }
-    return 1;
+    return "1";
   }
 
   if (exchangeRate === undefined) {
@@ -982,17 +1230,17 @@ function normalizeWsfeExchangeRate(
       return undefined;
     }
     throw new ArcaInputError(
-      "exchangeRate is required unless sameCurrencyForeignCancellation is S for a foreign-currency voucher."
+      "exchangeRate is required unless sameCurrencyForeignCancellation is S for a foreign-currency voucher.",
+      {
+        code: "ARCA_INPUT_MISSING_FIELD",
+        field: "exchangeRate",
+        expected:
+          "a positive exchange rate unless sameCurrencyForeignCancellation is S",
+      }
     );
   }
 
-  if (!(Number.isFinite(exchangeRate) && exchangeRate > 0)) {
-    throw new ArcaInputError(
-      "exchangeRate must be a positive finite number for a foreign-currency voucher."
-    );
-  }
-
-  return exchangeRate;
+  return serializeArcaExchangeRate(exchangeRate, "exchangeRate");
 }
 
 function normalizeWsfeDateInput(
@@ -1003,7 +1251,9 @@ function normalizeWsfeDateInput(
     throw new ArcaInputError(
       `Invalid WSFE ${fieldName}: expected a YYYY-MM-DD or YYYYMMDD string`,
       {
-        detail: { field: fieldName, value },
+        code: "ARCA_INPUT_INVALID_DATE",
+        field: fieldName,
+        expected: "a YYYY-MM-DD or YYYYMMDD calendar date string",
       }
     );
   }
@@ -1012,21 +1262,23 @@ function normalizeWsfeDateInput(
   const afipMatch = normalizedValue.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (afipMatch) {
     const [, year, month, day] = afipMatch;
-    assertValidCalendarDate(year, month, day, fieldName, normalizedValue);
+    assertValidCalendarDate(year, month, day, fieldName);
     return normalizedValue;
   }
 
   const isoMatch = normalizedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoMatch) {
     const [, year, month, day] = isoMatch;
-    assertValidCalendarDate(year, month, day, fieldName, normalizedValue);
+    assertValidCalendarDate(year, month, day, fieldName);
     return `${year}${month}${day}`;
   }
 
   throw new ArcaInputError(
     `Invalid WSFE ${fieldName}: expected a YYYY-MM-DD or YYYYMMDD string`,
     {
-      detail: { field: fieldName, value: normalizedValue },
+      code: "ARCA_INPUT_INVALID_DATE",
+      field: fieldName,
+      expected: "a YYYY-MM-DD or YYYYMMDD calendar date string",
     }
   );
 }
@@ -1035,8 +1287,7 @@ function assertValidCalendarDate(
   yearInput: string,
   monthInput: string,
   dayInput: string,
-  fieldName: string,
-  value: string
+  fieldName: string
 ) {
   const year = Number(yearInput);
   const month = Number(monthInput);
@@ -1051,7 +1302,9 @@ function assertValidCalendarDate(
     throw new ArcaInputError(
       `Invalid WSFE ${fieldName}: received a non-existent calendar date`,
       {
-        detail: { field: fieldName, value },
+        code: "ARCA_INPUT_INVALID_DATE",
+        field: fieldName,
+        expected: "an existing calendar date",
       }
     );
   }

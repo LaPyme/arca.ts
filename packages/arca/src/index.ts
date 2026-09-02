@@ -9,6 +9,7 @@ export {
   createArcaClientConfigFromEnv,
   resolveArcaEnvironment,
 } from "./config";
+export type { ArcaInputErrorCode, ArcaInputErrorOptions } from "./errors";
 export {
   ArcaConfigurationError,
   ArcaError,
@@ -60,6 +61,13 @@ export type {
   WsfeVoucherLookupResult,
 } from "./services/wsfe";
 export { createWsfeService } from "./services/wsfe";
+export type {
+  BuildFacturaBInput,
+  BuildFacturaCInput,
+  WsfeBuilderCurrencyInput,
+  WsfeBuilderVatRate,
+} from "./services/wsfe-builders";
+export { buildFacturaB, buildFacturaC } from "./services/wsfe-builders";
 export type {
   CreateWsmtxcaServiceOptions,
   WsmtxcaAuthorizationOutcome,

@@ -47,7 +47,22 @@ export const ARCA_VAT_RATES = {
   IVA_2_5: 9,
 } as const;
 
-/** Common ARCA currency identifiers. */
+/** ISO currency codes accepted by the high-level WSFE builders. */
+export const ISO_CURRENCIES = {
+  ARS: "ARS",
+  USD: "USD",
+} as const;
+
+/** ARCA currency identifiers keyed by their corresponding ISO currency. */
+export const ARCA_CURRENCY_IDS = {
+  ARS: "PES",
+  USD: "DOL",
+} as const;
+
+/**
+ * Common ARCA currency identifiers.
+ * @deprecated Use ISO_CURRENCIES for builders or ARCA_CURRENCY_IDS at the exact provider boundary.
+ */
 export const ARCA_CURRENCIES = {
   PES: "PES",
   DOL: "DOL",

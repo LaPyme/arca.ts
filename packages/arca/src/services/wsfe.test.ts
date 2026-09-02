@@ -46,6 +46,7 @@ function createBaseVoucherInput(
     vatAmount: 21,
     currencyId: "PES",
     exchangeRate: 1,
+    vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
     ...overrides,
   };
 }
@@ -367,29 +368,316 @@ describe("createWsfeService", () => {
         .FECAEDetRequest
     ).toMatchObject({
       MonId: "PES",
-      MonCotiz: 1,
+      MonCotiz: "1",
     });
+  });
+
+  it("serializes every exact WSFE amount and exchange rate canonically", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: {
+                Resultado: "A",
+                CAE: "123456789",
+                CAEFchVto: "20260501",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    await createWsfeService(options).authorizeVoucher({
+      data: createBaseVoucherInput({
+        totalAmount: 0.1 + 0.2,
+        netAmount: 0.3,
+        vatAmount: 0,
+        vatRates: undefined,
+        currencyId: "DOL",
+        exchangeRate: "1095.500000",
+      }),
+      voucherNumber: 42,
+    });
+
+    expect(
+      options.soap.execute.mock.calls[0]?.[0].body.FeCAEReq.FeDetReq
+        .FECAEDetRequest
+    ).toMatchObject({
+      ImpTotal: "0.30",
+      ImpTotConc: "0.00",
+      ImpNeto: "0.30",
+      ImpOpEx: "0.00",
+      ImpTrib: "0.00",
+      ImpIVA: "0.00",
+      MonId: "DOL",
+      MonCotiz: "1095.5",
+    });
+    expect(options.soap.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "FECAESolicitar", retries: 0 })
+    );
+  });
+
+  it.each([
+    {
+      overrides: { totalAmount: 259.2576 },
+      code: "ARCA_INPUT_AMOUNT_PRECISION",
+      field: "totalAmount",
+    },
+    {
+      overrides: { netAmount: -1 },
+      code: "ARCA_INPUT_INVALID_AMOUNT",
+      field: "netAmount",
+    },
+    {
+      overrides: { vatRates: [{ id: 5, baseAmount: 100, amount: 21.001 }] },
+      code: "ARCA_INPUT_AMOUNT_PRECISION",
+      field: "vatRates[0].amount",
+    },
+    {
+      overrides: {
+        taxes: [{ id: 99, baseAmount: 100, rate: 1.001, amount: 0 }],
+      },
+      code: "ARCA_INPUT_AMOUNT_PRECISION",
+      field: "taxes[0].rate",
+    },
+  ])("rejects invalid exact amount precision before authentication", ({
+    overrides,
+    code,
+    field,
+  }) => {
+    const options = createBaseOptions();
+
+    expect(() =>
+      createWsfeService(options).authorizeVoucher({
+        data: createBaseVoucherInput(overrides),
+        voucherNumber: 42,
+      })
+    ).toThrowError(
+      expect.objectContaining({ name: "ArcaInputError", code, field })
+    );
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      overrides: { totalAmount: 122 },
+      field: "totalAmount",
+    },
+    {
+      overrides: { totalAmount: 120, vatAmount: 20 },
+      field: "vatAmount",
+    },
+    {
+      overrides: { totalAmount: 122, netAmount: 101 },
+      field: "netAmount",
+    },
+    {
+      overrides: {
+        totalAmount: 131,
+        taxAmount: 10,
+        taxes: [{ id: 99, baseAmount: 100, rate: 10, amount: 8 }],
+      },
+      field: "taxAmount",
+    },
+  ])("rejects exact amount mismatches at $field before authentication", ({
+    overrides,
+    field,
+  }) => {
+    const options = createBaseOptions();
+
+    expect(() =>
+      createWsfeService(options).authorizeVoucherOutcome({
+        data: createBaseVoucherInput(overrides),
+        voucherNumber: 42,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaInputError",
+        code: "ARCA_INPUT_AMOUNT_MISMATCH",
+        field,
+      })
+    );
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    2, 3, 7, 8, 52, 53,
+  ])("allows voucher type %s to use ARCA's exempt VAT-base reconciliation", async (voucherType) => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FECAESolicitar", {
+        FeDetResp: {
+          FECAEDetResponse: {
+            Resultado: "A",
+            CAE: "1",
+            CAEFchVto: "20260501",
+          },
+        },
+      })
+    );
+
+    await expect(
+      createWsfeService(options).authorizeVoucher({
+        data: createBaseVoucherInput({
+          voucherType,
+          vatRates: [{ id: 5, baseAmount: 90, amount: 21 }],
+        }),
+        voucherNumber: 42,
+      })
+    ).resolves.toMatchObject({ cae: "1" });
+  });
+
+  it("still reconciles VAT totals for voucher types exempt from VAT-base reconciliation", () => {
+    const options = createBaseOptions();
+
+    expect(() =>
+      createWsfeService(options).authorizeVoucher({
+        data: createBaseVoucherInput({
+          voucherType: 7,
+          vatRates: [{ id: 5, baseAmount: 90, amount: 20 }],
+        }),
+        voucherNumber: 42,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ARCA_INPUT_AMOUNT_MISMATCH",
+        field: "vatAmount",
+      })
+    );
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).not.toHaveBeenCalled();
+  });
+
+  it("accepts the documented absolute and relative reconciliation tolerances", async () => {
+    const absoluteOptions = createBaseOptions();
+    absoluteOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: {
+                Resultado: "A",
+                CAE: "1",
+                CAEFchVto: "20260501",
+              },
+            },
+          },
+        },
+      },
+    });
+    await expect(
+      createWsfeService(absoluteOptions).authorizeVoucher({
+        data: createBaseVoucherInput({ totalAmount: 121.01 }),
+        voucherNumber: 1,
+      })
+    ).resolves.toMatchObject({ cae: "1" });
+
+    const relativeOptions = createBaseOptions();
+    relativeOptions.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: {
+                Resultado: "A",
+                CAE: "2",
+                CAEFchVto: "20260501",
+              },
+            },
+          },
+        },
+      },
+    });
+    await expect(
+      createWsfeService(relativeOptions).authorizeVoucher({
+        data: createBaseVoucherInput({
+          totalAmount: 10_001,
+          netAmount: 10_000,
+          vatAmount: 0,
+          vatRates: undefined,
+        }),
+        voucherNumber: 2,
+      })
+    ).resolves.toMatchObject({ cae: "2" });
+  });
+
+  it("requires receiver VAT condition and monetary detail before authentication", () => {
+    const receiverOptions = createBaseOptions();
+    expect(() =>
+      createWsfeService(receiverOptions).authorizeVoucher({
+        data: createBaseVoucherInput({
+          receiverVatConditionId: undefined as never,
+        }),
+        voucherNumber: 42,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ARCA_INPUT_MISSING_FIELD",
+        field: "receiverVatConditionId",
+      })
+    );
+    expect(receiverOptions.auth.login).not.toHaveBeenCalled();
+
+    const vatOptions = createBaseOptions();
+    expect(() =>
+      createWsfeService(vatOptions).authorizeVoucher({
+        data: createBaseVoucherInput({ vatRates: undefined }),
+        voucherNumber: 42,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ARCA_INPUT_MISSING_FIELD",
+        field: "vatRates",
+      })
+    );
+    expect(vatOptions.auth.login).not.toHaveBeenCalled();
+
+    const taxOptions = createBaseOptions();
+    expect(() =>
+      createWsfeService(taxOptions).authorizeVoucher({
+        data: createBaseVoucherInput({ totalAmount: 131, taxAmount: 10 }),
+        voucherNumber: 42,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ARCA_INPUT_MISSING_FIELD",
+        field: "taxes",
+      })
+    );
+    expect(taxOptions.auth.login).not.toHaveBeenCalled();
   });
 
   it.each([
     {
       name: "a non-unit peso rate",
       overrides: { exchangeRate: 1.01 },
+      code: "ARCA_INPUT_INVALID_EXCHANGE_RATE",
       message: "exchangeRate must be 1 when currencyId is PES.",
     },
     {
       name: "a missing foreign-currency rate",
       overrides: { currencyId: "USD", exchangeRate: undefined },
+      code: "ARCA_INPUT_MISSING_FIELD",
       message:
         "exchangeRate is required unless sameCurrencyForeignCancellation is S for a foreign-currency voucher.",
     },
     {
       name: "a non-positive foreign-currency rate",
       overrides: { currencyId: "USD", exchangeRate: 0 },
+      code: "ARCA_INPUT_INVALID_EXCHANGE_RATE",
       message:
-        "exchangeRate must be a positive finite number for a foreign-currency voucher.",
+        "exchangeRate must be a positive decimal with at most 4 integer and 6 fractional digits.",
     },
-  ])("rejects $name before network work", async ({ overrides, message }) => {
+  ])("rejects $name before network work", async ({
+    overrides,
+    code,
+    message,
+  }) => {
     const options = createBaseOptions();
 
     await expect(
@@ -398,7 +686,8 @@ describe("createWsfeService", () => {
       })
     ).rejects.toMatchObject({
       name: "ArcaInputError",
-      code: "ARCA_INPUT_ERROR",
+      code,
+      field: "exchangeRate",
       message,
     });
     expect(options.auth.login).not.toHaveBeenCalled();
@@ -441,6 +730,8 @@ describe("createWsfeService", () => {
       forceRefresh: true,
       data: createBaseVoucherInput({
         currencyId: "USD",
+        totalAmount: 131,
+        taxAmount: 10,
         associatedVouchers: [{ type: 1, salesPoint: 1, number: 1 }],
         taxes: [{ id: 99, baseAmount: 100, rate: 10, amount: 10 }],
         vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
@@ -499,10 +790,17 @@ describe("createWsfeService", () => {
                 CbteAsoc: [{ Tipo: 1, PtoVta: 1, Nro: 1 }],
               },
               Tributos: {
-                Tributo: [{ Id: 99, BaseImp: 100, Alic: 10, Importe: 10 }],
+                Tributo: [
+                  {
+                    Id: 99,
+                    BaseImp: "100.00",
+                    Alic: "10.00",
+                    Importe: "10.00",
+                  },
+                ],
               },
               Iva: {
-                AlicIva: [{ Id: 5, BaseImp: 100, Importe: 21 }],
+                AlicIva: [{ Id: 5, BaseImp: "100.00", Importe: "21.00" }],
               },
               Opcionales: {
                 Opcional: [{ Id: "27", Valor: "test" }],
@@ -608,7 +906,7 @@ describe("createWsfeService", () => {
 
     expect(request).toMatchObject({
       MonId: "PES",
-      MonCotiz: 1,
+      MonCotiz: "1",
     });
     expect(request).not.toHaveProperty("CanMisMonExt");
   });
@@ -755,7 +1053,8 @@ describe("createWsfeService", () => {
       })
     ).rejects.toMatchObject({
       name: "ArcaInputError",
-      code: "ARCA_INPUT_ERROR",
+      code: "ARCA_INPUT_INVALID_DATE",
+      field: "associatedPeriod.startDate",
       message:
         "Invalid WSFE associatedPeriod.startDate: expected a YYYY-MM-DD or YYYYMMDD string",
     });
@@ -913,7 +1212,8 @@ describe("createWsfeService", () => {
       })
     ).rejects.toMatchObject({
       name: "ArcaInputError",
-      code: "ARCA_INPUT_ERROR",
+      code: "ARCA_INPUT_INVALID_DATE",
+      field: "voucherDate",
       message:
         "Invalid WSFE voucherDate: expected a YYYY-MM-DD or YYYYMMDD string",
     });
@@ -934,7 +1234,8 @@ describe("createWsfeService", () => {
       })
     ).rejects.toMatchObject({
       name: "ArcaInputError",
-      code: "ARCA_INPUT_ERROR",
+      code: "ARCA_INPUT_INVALID_DATE",
+      field: "voucherDate",
       message:
         "Invalid WSFE voucherDate: expected a YYYY-MM-DD or YYYYMMDD string",
     });

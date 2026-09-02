@@ -28,14 +28,11 @@ npm install facturas
 This example mirrors [examples/factura-b-consumidor-final.ts](./examples/factura-b-consumidor-final.ts).
 
 ```ts
-import { createArcaClient } from "facturas";
+import { buildFacturaB, createArcaClient } from "facturas";
 import {
   ARCA_CONCEPT_TYPES,
-  ARCA_CURRENCIES,
   ARCA_DOCUMENT_TYPES,
   ARCA_RECEIVER_VAT_CONDITIONS,
-  ARCA_VAT_RATES,
-  ARCA_VOUCHER_TYPES,
 } from "facturas/constants";
 
 const client = createArcaClient({
@@ -47,38 +44,50 @@ const client = createArcaClient({
   environment: "test",
 });
 
-// createNextVoucher is for one writer per sales-point/voucher-type sequence.
-// Coordinate externally or authorize an explicitly reserved number when concurrent.
+const data = buildFacturaB({
+  salesPoint: 1,
+  concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
+  documentType: ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL,
+  documentNumber: 0,
+  receiverVatConditionId: ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
+  // Deterministic example date; use an ARCA-allowed current date in homologation.
+  voucherDate: "2026-09-02",
+  taxableAmount: 10_000, // Integer minor units: ARS 100.00.
+  vatRate: 21,
+  // currency is omitted, so the builder defaults to ISO ARS.
+});
+
+// Single-writer convenience: coordinate this sales-point/voucher-type lane.
 const issued = await client.wsfe.createNextVoucher({
-  data: {
-    salesPoint: 1,
-    voucherType: ARCA_VOUCHER_TYPES.FACTURA_B,
-    concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
-    documentType: ARCA_DOCUMENT_TYPES.DNI,
-    documentNumber: 30123456,
-    receiverVatConditionId:
-      ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
-    // Deterministic example date; use an ARCA-allowed current date in homologation.
-    voucherDate: "2026-05-01",
-    totalAmount: 121,
-    nonTaxableAmount: 0,
-    netAmount: 100,
-    exemptAmount: 0,
-    taxAmount: 0,
-    vatAmount: 21,
-    currencyId: ARCA_CURRENCIES.PES,
-    exchangeRate: 1,
-    vatRates: [
-      {
-        id: ARCA_VAT_RATES.IVA_21,
-        baseAmount: 100,
-        amount: 21,
-      },
-    ],
-  },
+  data,
 });
 
 console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
+```
+
+`buildFacturaB()` derives the Factura B type, net amount, IVA detail, IVA
+amount, zero-value fields, and total without floating-point tax arithmetic.
+`buildFacturaC()` separately builds the zero-IVA Factura C shape. Both builders
+accept integer currency minor units and support ISO `ARS` (the default) and
+`USD`. Factura B requires a positive `taxableAmount`; when `vatRate` is
+positive, the amount must produce at least one currency minor unit of IVA after
+rounding.
+
+For a USD invoice, pass a decimal-string exchange rate:
+
+```ts
+const usdData = buildFacturaB({
+  salesPoint: 1,
+  concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
+  documentType: ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL,
+  documentNumber: 0,
+  receiverVatConditionId: ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
+  voucherDate: "2026-09-02",
+  taxableAmount: 10_000, // USD 100.00.
+  vatRate: 21,
+  currency: "USD",
+  exchangeRate: "1095.500000",
+});
 ```
 
 ## What You Can Do Today
@@ -101,11 +110,15 @@ WSMTXCA remains supported and exported, but this package currently puts most edi
 
 ## Exact authorization and recovery evidence
 
-Use `authorizeVoucherOutcome(...)` when your application must decide whether one exact fiscal attempt was authorized, rejected, or left indeterminate. It preserves every structured error and observation with its service, operation, code, source, and result level.
+Use `authorizeVoucherOutcome(...)` with a caller-owned, durably reserved voucher
+number when your application must decide whether one exact fiscal attempt was
+authorized, rejected, or left indeterminate. It preserves every structured
+error and observation with its service, operation, code, source, and result
+level.
 
 ```ts
 const outcome = await client.wsfe.authorizeVoucherOutcome({
-  voucherNumber: 100,
+  voucherNumber: reservedVoucherNumber,
   data,
 });
 
@@ -114,9 +127,9 @@ if (outcome.kind === "authorized") {
 } else if (outcome.kind === "rejected") {
   console.error(outcome.errors, outcome.observations);
 } else {
-  // Consult voucher 100 before any new authorization attempt.
+  // Consult the same number before any new authorization attempt.
   const lookup = await client.wsfe.lookupVoucher({
-    number: 100,
+    number: reservedVoucherNumber,
     salesPoint: data.salesPoint,
     voucherType: data.voucherType,
   });
@@ -134,6 +147,45 @@ Exact lookup absence is operation-specific:
 - WSMTXCA code 602 is not exact-voucher absence and remains an error.
 
 The SDK normalizes provider protocol evidence only. Your application remains responsible for persisting the exact request, owning its sequence or lane, and deciding when a retry is safe.
+
+For exemptions, non-taxable amounts, tributes, multiple IVA rates, notes, or
+other advanced cases, use the exact `WsfeVoucherInput` escape hatch. Exact
+amounts remain major-unit numbers, are validated locally, and are serialized as
+canonical two-decimal strings:
+
+```ts
+import type { WsfeVoucherInput } from "facturas/wsfe";
+import {
+  ARCA_CONCEPT_TYPES,
+  ARCA_CURRENCY_IDS,
+  ARCA_DOCUMENT_TYPES,
+  ARCA_RECEIVER_VAT_CONDITIONS,
+  ARCA_VAT_RATES,
+  ARCA_VOUCHER_TYPES,
+} from "facturas/constants";
+
+const exactData: WsfeVoucherInput = {
+  salesPoint: 1,
+  voucherType: ARCA_VOUCHER_TYPES.FACTURA_B,
+  concept: ARCA_CONCEPT_TYPES.PRODUCTOS,
+  documentType: ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL,
+  documentNumber: 0,
+  receiverVatConditionId: ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
+  voucherDate: "2026-09-02",
+  totalAmount: 121,
+  nonTaxableAmount: 0,
+  netAmount: 100,
+  exemptAmount: 0,
+  taxAmount: 0,
+  vatAmount: 21,
+  currencyId: ARCA_CURRENCY_IDS.ARS,
+  exchangeRate: "1",
+  vatRates: [{ id: ARCA_VAT_RATES.IVA_21, baseAmount: 100, amount: 21 }],
+};
+```
+
+Exact inputs and live catalog responses use ARCA protocol identifiers such as
+`PES` and `DOL`; only the high-level builders accept ISO `ARS` and `USD`.
 
 ## Examples
 
@@ -165,7 +217,7 @@ Official ARCA / AFIP references:
 - [Certificates for testing / homologation](https://www.afip.gob.ar/ws/documentacion/certificados.asp)
 - [WSAA developer manual](https://www.afip.gob.ar/ws/WSAA/WSAAmanualDev.pdf)
 - [WSASS service onboarding](https://www.afip.gob.ar/ws/WSASS/WSASS_como_adherirse.pdf)
-- [WSFE developer manual](https://www.afip.gob.ar/ws/documentacion/manuales/manual-desarrollador-ARCA-COMPG-v4-0.pdf)
+- [WSFE developer manual](https://www.afip.gob.ar/ws/documentacion/manuales/manual-desarrollador-ARCA-COMPG.pdf)
 
 ## Reference Data
 
@@ -174,11 +226,13 @@ The package exports a small, stable set of common ARCA codes from `facturas/cons
 ```ts
 import {
   ARCA_CONCEPT_TYPES,
+  ARCA_CURRENCY_IDS,
   ARCA_CURRENCIES,
   ARCA_DOCUMENT_TYPES,
   ARCA_RECEIVER_VAT_CONDITIONS,
   ARCA_VAT_RATES,
   ARCA_VOUCHER_TYPES,
+  ISO_CURRENCIES,
 } from "facturas/constants";
 
 ARCA_VOUCHER_TYPES.FACTURA_A; // 1
@@ -190,6 +244,8 @@ ARCA_RECEIVER_VAT_CONDITIONS.RESPONSABLE_INSCRIPTO; // 1
 ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL; // 5
 ARCA_CONCEPT_TYPES.SERVICIOS; // 2
 ARCA_VAT_RATES.IVA_21; // 5
+ISO_CURRENCIES.ARS; // "ARS"
+ARCA_CURRENCY_IDS.USD; // "DOL"
 ARCA_CURRENCIES.PES; // "PES"
 ARCA_CURRENCIES.DOL; // "DOL"
 ```
@@ -201,9 +257,14 @@ The constants cover the most common values used by the README and examples:
 - common receiver IVA conditions, subject to voucher-class and live-catalog rules
 - concept types for products, services, and products + services
 - IVA rates for `0`, `2.5`, `5`, `10.5`, `21`, and `27`
-- common currencies `PES` and `DOL`
+- builder ISO currencies `ARS` and `USD`, with explicit ARCA mappings to `PES`
+  and `DOL`
 
-If you need broader catalogs at runtime, WSFE methods such as `getVoucherTypes()`, `getDocumentTypes()`, `getCurrencyTypes()`, and `getVatRates()` are still available.
+`ARCA_CURRENCIES` remains a deprecated compatibility alias with its existing
+`PES` and `DOL` values. If you need broader catalogs at runtime, WSFE methods
+such as `getVoucherTypes()`, `getDocumentTypes()`, `getCurrencyTypes()`, and
+`getVatRates()` are still available. `getCurrencyTypes()` returns live ARCA
+identifiers, not ISO codes.
 
 ## Configuration
 
