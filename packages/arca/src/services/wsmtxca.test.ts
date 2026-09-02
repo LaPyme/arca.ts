@@ -112,7 +112,8 @@ describe("createWsmtxcaService", () => {
       })
     ).rejects.toMatchObject({
       name: "ArcaInputError",
-      code: "ARCA_INPUT_ERROR",
+      code: "ARCA_INPUT_RESERVED_FIELD",
+      field: "data.authRequest",
       message:
         'WSMTXCA authorization data cannot include the reserved top-level field "authRequest".',
     });
@@ -130,7 +131,8 @@ describe("createWsmtxcaService", () => {
       })
     ).rejects.toMatchObject({
       name: "ArcaInputError",
-      code: "ARCA_INPUT_ERROR",
+      code: "ARCA_INPUT_RESERVED_FIELD",
+      field: "data.authRequest",
       message:
         'WSMTXCA authorization data cannot include the reserved top-level field "authRequest".',
     });

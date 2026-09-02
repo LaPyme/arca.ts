@@ -26,19 +26,34 @@ export class ArcaConfigurationError extends ArcaError {
   }
 }
 
+/** Stable routing codes for caller-provided input failures. */
+export type ArcaInputErrorCode =
+  | "ARCA_INPUT_INVALID_DATE"
+  | "ARCA_INPUT_INVALID_AMOUNT"
+  | "ARCA_INPUT_AMOUNT_PRECISION"
+  | "ARCA_INPUT_AMOUNT_MISMATCH"
+  | "ARCA_INPUT_INVALID_EXCHANGE_RATE"
+  | "ARCA_INPUT_INVALID_VALUE"
+  | "ARCA_INPUT_MISSING_FIELD"
+  | "ARCA_INPUT_RESERVED_FIELD";
+
+export type ArcaInputErrorOptions = ErrorOptions & {
+  code: ArcaInputErrorCode;
+  field?: string;
+  expected?: string;
+};
+
 /** Thrown when caller-provided input data is missing or invalid. */
 export class ArcaInputError extends ArcaError {
+  declare readonly code: ArcaInputErrorCode;
   override readonly name: string = "ArcaInputError";
-  readonly detail?: unknown;
+  readonly field?: string;
+  readonly expected?: string;
 
-  constructor(
-    message: string,
-    options?: ErrorOptions & {
-      detail?: unknown;
-    }
-  ) {
-    super(message, "ARCA_INPUT_ERROR", options);
-    this.detail = options?.detail;
+  constructor(message: string, options: ArcaInputErrorOptions) {
+    super(message, options.code, options);
+    this.field = options.field;
+    this.expected = options.expected;
   }
 }
 

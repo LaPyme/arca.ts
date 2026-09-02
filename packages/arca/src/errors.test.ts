@@ -17,7 +17,9 @@ describe("errors", () => {
     const configError = new ArcaConfigurationError("config", { cause });
     const inputError = new ArcaInputError("input", {
       cause,
-      detail: { field: "voucherDate" },
+      code: "ARCA_INPUT_INVALID_DATE",
+      field: "voucherDate",
+      expected: "a YYYY-MM-DD or YYYYMMDD string",
     });
     const transportError = new ArcaTransportError("transport", {
       cause,
@@ -75,9 +77,12 @@ describe("errors", () => {
     });
     expect(inputError).toMatchObject({
       name: "ArcaInputError",
-      code: "ARCA_INPUT_ERROR",
-      detail: { field: "voucherDate" },
+      code: "ARCA_INPUT_INVALID_DATE",
+      field: "voucherDate",
+      expected: "a YYYY-MM-DD or YYYYMMDD string",
+      cause,
     });
+    expect(inputError).not.toHaveProperty("detail");
     expect(transportError).toMatchObject({
       name: "ArcaTransportError",
       code: "ARCA_TRANSPORT_ERROR",

@@ -186,7 +186,12 @@ export function createWsmtxcaService(
   }> {
     if (Object.hasOwn(data, "authRequest")) {
       throw new ArcaInputError(
-        'WSMTXCA authorization data cannot include the reserved top-level field "authRequest".'
+        'WSMTXCA authorization data cannot include the reserved top-level field "authRequest".',
+        {
+          code: "ARCA_INPUT_RESERVED_FIELD",
+          field: "data.authRequest",
+          expected: "omitted because facturas manages authentication fields",
+        }
       );
     }
 
