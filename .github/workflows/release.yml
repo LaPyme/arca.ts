@@ -8,7 +8,7 @@ on:
     branches:
       - main
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+concurrency: ${{ github.workflow }}-main
 
 permissions:
   contents: write
@@ -23,6 +23,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify that CI tested this release commit
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_sha" != "$TESTED_SHA" ]]; then
+            echo "main advanced after the triggering CI run; refusing to release"
+            exit 1
+          fi
 
       - uses: pnpm/action-setup@v4
 
