@@ -4,31 +4,56 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 
 const entrypoints = [
-  ["facturas", "createArcaClient"],
-  ["facturas/constants", "ARCA_VOUCHER_TYPES"],
-  ["facturas/errors", "ArcaError"],
-  ["facturas/padron", "createPadronService"],
-  ["facturas/types", null],
-  ["facturas/wsfe", "createWsfeService"],
-  ["facturas/wsmtxca", "createWsmtxcaService"],
+  [
+    "facturas",
+    [
+      "createArcaClient",
+      "buildFacturaB",
+      "buildFacturaC",
+      "ArcaInputError",
+      "ArcaAuthenticationError",
+      "isArcaAuthenticationError",
+    ],
+  ],
+  [
+    "facturas/constants",
+    ["ARCA_VOUCHER_TYPES", "ISO_CURRENCIES", "ARCA_CURRENCY_IDS"],
+  ],
+  [
+    "facturas/errors",
+    [
+      "ArcaError",
+      "ArcaInputError",
+      "ArcaAuthenticationError",
+      "isArcaAuthenticationError",
+    ],
+  ],
+  ["facturas/padron", ["createPadronService"]],
+  ["facturas/types", []],
+  ["facturas/wsfe", ["createWsfeService", "buildFacturaB", "buildFacturaC"]],
+  ["facturas/wsmtxca", ["createWsmtxcaService"]],
 ];
 
-for (const [specifier, runtimeExport] of entrypoints) {
+for (const [specifier, runtimeExports] of entrypoints) {
   const imported = await import(specifier);
 
-  if (runtimeExport && !(runtimeExport in imported)) {
-    throw new Error(
-      `Expected ${specifier} ESM import to expose ${runtimeExport}.`
-    );
+  for (const runtimeExport of runtimeExports) {
+    if (!(runtimeExport in imported)) {
+      throw new Error(
+        `Expected ${specifier} ESM import to expose ${runtimeExport}.`
+      );
+    }
   }
 
   try {
     const required = require(specifier);
 
-    if (runtimeExport && !(runtimeExport in required)) {
-      throw new Error(
-        `Expected ${specifier} require() to expose ${runtimeExport}.`
-      );
+    for (const runtimeExport of runtimeExports) {
+      if (!(runtimeExport in required)) {
+        throw new Error(
+          `Expected ${specifier} require() to expose ${runtimeExport}.`
+        );
+      }
     }
   } catch (error) {
     if (
@@ -40,4 +65,4 @@ for (const [specifier, runtimeExport] of entrypoints) {
   }
 }
 
-console.log("Package exports resolve as ESM-only entrypoints.");
+console.log("Package runtime exports resolve as ESM-only entrypoints.");

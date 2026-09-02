@@ -43,7 +43,7 @@
     "test": "vitest run --config vitest.config.ts",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
     "check": "ultracite check",
-    "check:exports": "pnpm build && node scripts/check-package-exports.mjs",
+    "check:exports": "pnpm build && node scripts/check-package-exports.mjs && tsc --project scripts/tsconfig.package-consumer.json --noEmit",
     "fix": "ultracite fix"
   },
   "exports": {
