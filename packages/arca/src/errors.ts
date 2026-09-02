@@ -1,3 +1,4 @@
+import { redactDiagnosticPreview } from "./internal/redaction";
 import type { ArcaServiceName } from "./internal/types";
 import type {
   ArcaFiscalIssue,
@@ -46,20 +47,26 @@ export class ArcaTransportError extends ArcaError {
   override readonly name: string = "ArcaTransportError";
   readonly statusCode?: number;
   readonly contentType?: string;
-  readonly responseBody?: string;
+  readonly responseBodyLength?: number;
+  readonly responseBodyPreview?: string;
 
   constructor(
     message: string,
     options?: ErrorOptions & {
       statusCode?: number;
       contentType?: string;
-      responseBody?: string;
+      responseBodyLength?: number;
+      responseBodyPreview?: string;
     }
   ) {
     super(message, "ARCA_TRANSPORT_ERROR", options);
     this.statusCode = options?.statusCode;
     this.contentType = options?.contentType;
-    this.responseBody = options?.responseBody;
+    this.responseBodyLength = options?.responseBodyLength;
+    this.responseBodyPreview =
+      options?.responseBodyPreview === undefined
+        ? undefined
+        : redactDiagnosticPreview(options.responseBodyPreview);
   }
 }
 
@@ -67,18 +74,18 @@ export class ArcaTransportError extends ArcaError {
 export class ArcaSoapFaultError extends ArcaError {
   override readonly name: string = "ArcaSoapFaultError";
   readonly faultCode?: string;
-  readonly detail?: unknown;
 
   constructor(
     message: string,
     options?: ErrorOptions & {
       faultCode?: string;
-      detail?: unknown;
     }
   ) {
-    super(message, "ARCA_SOAP_FAULT", options);
-    this.faultCode = options?.faultCode;
-    this.detail = options?.detail;
+    super(redactDiagnosticPreview(message), "ARCA_SOAP_FAULT", options);
+    this.faultCode =
+      options?.faultCode === undefined
+        ? undefined
+        : redactDiagnosticPreview(options.faultCode);
   }
 }
 
@@ -92,7 +99,6 @@ export class ArcaInvalidSoapResponseError extends ArcaError {
   readonly contentType?: string;
   readonly responseBodyLength?: number;
   readonly responseBodyPreview?: string;
-  readonly parsedDetail?: unknown;
 
   constructor(
     message: string,
@@ -104,7 +110,6 @@ export class ArcaInvalidSoapResponseError extends ArcaError {
       contentType?: string;
       responseBodyLength?: number;
       responseBodyPreview?: string;
-      parsedDetail?: unknown;
     }
   ) {
     super(message, "ARCA_INVALID_SOAP_RESPONSE", options);
@@ -114,8 +119,10 @@ export class ArcaInvalidSoapResponseError extends ArcaError {
     this.statusCode = options?.statusCode;
     this.contentType = options?.contentType;
     this.responseBodyLength = options?.responseBodyLength;
-    this.responseBodyPreview = options?.responseBodyPreview;
-    this.parsedDetail = options?.parsedDetail;
+    this.responseBodyPreview =
+      options?.responseBodyPreview === undefined
+        ? undefined
+        : redactDiagnosticPreview(options.responseBodyPreview);
   }
 }
 
@@ -130,7 +137,6 @@ export class ArcaServiceError extends ArcaError {
   readonly results?: ArcaFiscalResults;
   readonly cae?: string;
   readonly issues?: readonly ArcaFiscalIssue[];
-  readonly detail?: unknown;
 
   constructor(
     message: string,
@@ -143,7 +149,6 @@ export class ArcaServiceError extends ArcaError {
       results?: ArcaFiscalResults;
       cae?: string;
       issues?: readonly ArcaFiscalIssue[];
-      detail?: unknown;
     }
   ) {
     super(message, "ARCA_SERVICE_ERROR", options);
@@ -155,6 +160,5 @@ export class ArcaServiceError extends ArcaError {
     this.results = options?.results;
     this.cae = options?.cae;
     this.issues = options?.issues;
-    this.detail = options?.detail;
   }
 }

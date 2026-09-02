@@ -88,11 +88,9 @@ try {
         code: error?.code,
         message: error instanceof Error ? error.message : String(error),
         statusCode: error?.statusCode,
-        responseBodyPreview:
-          typeof error?.responseBody === "string"
-            ? preview(error.responseBody)
-            : undefined,
-        detail: error?.detail,
+        responseBodyLength: error?.responseBodyLength,
+        responseBodyPreview: error?.responseBodyPreview,
+        issues: error?.issues,
       },
       null,
       2
@@ -257,7 +255,9 @@ function loadEnvFile(filePath) {
 
 function preview(value) {
   return value
-    .replace(/<Token>.*?<\/Token>/gis, "<Token>[redacted]</Token>")
-    .replace(/<Sign>.*?<\/Sign>/gis, "<Sign>[redacted]</Sign>")
+    .replace(
+      /<((?:[A-Za-z_][\w.-]*:)?(?:Token|Sign))\b[^>]*>[\s\S]*?<\/\1\s*>/gi,
+      (_match, tagName) => `<${tagName}>[redacted]</${tagName}>`
+    )
     .slice(0, 2000);
 }

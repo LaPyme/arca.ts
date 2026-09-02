@@ -2,6 +2,7 @@ import { getArcaServiceConfig } from "../config";
 import { ArcaInvalidSoapResponseError, ArcaSoapFaultError } from "../errors";
 import { postXmlWithMetadata } from "../internal/http";
 import type { ArcaLogger } from "../internal/logger";
+import { createSafeErrorDiagnostic } from "../internal/redaction";
 import type {
   ArcaClientConfig,
   ArcaSoapExecutionOptions,
@@ -107,8 +108,7 @@ export function createSoapTransport(
             service: request.service,
             operation: request.operation,
             url,
-            faultCode: error.faultCode,
-            error,
+            ...createSafeErrorDiagnostic(error),
           });
         }
 
@@ -117,10 +117,7 @@ export function createSoapTransport(
             service: request.service,
             operation: request.operation,
             url,
-            statusCode: error.statusCode,
-            contentType: error.contentType,
-            responseBodyLength: error.responseBodyLength,
-            error,
+            ...createSafeErrorDiagnostic(error),
           });
         }
 

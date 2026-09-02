@@ -8,6 +8,7 @@ import {
 } from "../errors";
 import { postXmlWithMetadata } from "../internal/http";
 import type { ArcaLogger } from "../internal/logger";
+import { createSafeErrorDiagnostic } from "../internal/redaction";
 import type {
   ArcaAuthCredentials,
   ArcaAuthOptions,
@@ -166,8 +167,7 @@ export function createWsaaAuthModule(
           service,
           operation: "loginCms",
           url: ARCA_WSAA_CONFIG.endpoint[options.config.environment],
-          faultCode: error.faultCode,
-          error,
+          ...createSafeErrorDiagnostic(error),
         });
       }
 
