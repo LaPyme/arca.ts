@@ -505,6 +505,54 @@ describe("createWsfeService", () => {
     expect(options.soap.execute).not.toHaveBeenCalled();
   });
 
+  it.each([
+    2, 3, 7, 8, 52, 53,
+  ])("allows voucher type %s to use ARCA's exempt VAT-base reconciliation", async (voucherType) => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FECAESolicitar", {
+        FeDetResp: {
+          FECAEDetResponse: {
+            Resultado: "A",
+            CAE: "1",
+            CAEFchVto: "20260501",
+          },
+        },
+      })
+    );
+
+    await expect(
+      createWsfeService(options).authorizeVoucher({
+        data: createBaseVoucherInput({
+          voucherType,
+          vatRates: [{ id: 5, baseAmount: 90, amount: 21 }],
+        }),
+        voucherNumber: 42,
+      })
+    ).resolves.toMatchObject({ cae: "1" });
+  });
+
+  it("still reconciles VAT totals for voucher types exempt from VAT-base reconciliation", () => {
+    const options = createBaseOptions();
+
+    expect(() =>
+      createWsfeService(options).authorizeVoucher({
+        data: createBaseVoucherInput({
+          voucherType: 7,
+          vatRates: [{ id: 5, baseAmount: 90, amount: 20 }],
+        }),
+        voucherNumber: 42,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ARCA_INPUT_AMOUNT_MISMATCH",
+        field: "vatAmount",
+      })
+    );
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).not.toHaveBeenCalled();
+  });
+
   it("accepts the documented absolute and relative reconciliation tolerances", async () => {
     const absoluteOptions = createBaseOptions();
     absoluteOptions.soap.execute.mockResolvedValueOnce({

@@ -1118,13 +1118,15 @@ function normalizeAndValidateWsfeAmounts(
       "the sum of vatRates[].amount",
       vatRates.length
     );
-    assertWsfeAmountMatch(
-      netAmount,
-      vatRateBaseSum,
-      "netAmount",
-      "the sum of vatRates[].baseAmount",
-      vatRates.length
-    );
+    if (requiresWsfeVatBaseReconciliation(input.voucherType)) {
+      assertWsfeAmountMatch(
+        netAmount,
+        vatRateBaseSum,
+        "netAmount",
+        "the sum of vatRates[].baseAmount",
+        vatRates.length
+      );
+    }
   }
 
   const taxes = input.taxes ?? [];
@@ -1172,6 +1174,12 @@ function normalizeAndValidateWsfeAmounts(
     taxAmount: serializeArcaAmount(input.taxAmount, "taxAmount"),
     vatAmount: serializeArcaAmount(input.vatAmount, "vatAmount"),
   };
+}
+
+function requiresWsfeVatBaseReconciliation(voucherType: number): boolean {
+  // WSFE validation 10061 exempts debit/credit notes, class C vouchers,
+  // and class A vouchers with the retention legend.
+  return ![2, 3, 7, 8, 11, 12, 13, 15, 52, 53].includes(voucherType);
 }
 
 function assertWsfeAmountMatch(

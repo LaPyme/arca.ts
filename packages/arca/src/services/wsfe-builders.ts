@@ -86,6 +86,18 @@ export function buildFacturaB(input: BuildFacturaBInput): WsfeVoucherInput {
     });
   }
 
+  if (input.vatRate !== 0 && vatMinorUnits === 0n) {
+    throw new ArcaInputError(
+      "taxableAmount is too small to produce VAT at the selected positive vatRate.",
+      {
+        code: "ARCA_INPUT_INVALID_AMOUNT",
+        field: "taxableAmount",
+        expected:
+          "an amount that rounds to at least one currency minor unit of VAT for a positive vatRate",
+      }
+    );
+  }
+
   const vatRates: WsfeVatRate[] = [
     Object.freeze({
       id: vatRateId,
