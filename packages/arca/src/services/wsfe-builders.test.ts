@@ -81,26 +81,27 @@ describe("WSFE invoice builders", () => {
     ]);
   });
 
-  it("uses deterministic half-up VAT rounding at cent boundaries", () => {
-    expect(
-      buildFacturaB({
-        ...createBaseInput(),
-        taxableAmount: 10,
-        vatRate: 5,
-      })
-    ).toMatchObject({ netAmount: 0.1, vatAmount: 0.01, totalAmount: 0.11 });
+  it("rounds exact half-cent VAT to the even cent", () => {
     expect(
       buildFacturaB({
         ...createBaseInput(),
         taxableAmount: 50,
         vatRate: 21,
       })
-    ).toMatchObject({ netAmount: 0.5, vatAmount: 0.11, totalAmount: 0.61 });
+    ).toMatchObject({ netAmount: 0.5, vatAmount: 0.1, totalAmount: 0.6 });
+    expect(
+      buildFacturaB({
+        ...createBaseInput(),
+        taxableAmount: 150,
+        vatRate: 21,
+      })
+    ).toMatchObject({ netAmount: 1.5, vatAmount: 0.32, totalAmount: 1.82 });
   });
 
   it.each([
     [1, 21],
     [19, 2.5],
+    [10, 5],
   ] as const)("rejects %s minor units at %s%% when positive-rate VAT rounds to zero", (taxableAmount, vatRate) => {
     expect(() =>
       buildFacturaB({

@@ -71,7 +71,8 @@ amount, zero-value fields, and total without floating-point tax arithmetic.
 accept integer currency minor units and support ISO `ARS` (the default) and
 `USD`. Factura B requires a positive `taxableAmount`; when `vatRate` is
 positive, the amount must produce at least one currency minor unit of IVA after
-rounding.
+rounding. IVA uses the Round Half Even criterion documented by ARCA, so an
+exact half-cent is rounded to the even cent.
 
 For a USD invoice, pass a decimal-string exchange rate:
 

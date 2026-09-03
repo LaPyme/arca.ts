@@ -5,6 +5,7 @@ import {
   calculateVatMinorUnits,
   isWithinArcaTolerance,
   normalizeArcaAmountToMinorUnits,
+  roundHalfEvenRatio,
   type SupportedVatRate,
   serializeArcaAmount,
   serializeArcaExchangeRate,
@@ -70,10 +71,31 @@ describe("ARCA decimal helpers", () => {
     expect(calculateVatMinorUnits(net, rate, "vatRate")).toBe(vat);
   });
 
-  it("rounds exact half-cent VAT boundaries up", () => {
-    expect(calculateVatMinorUnits(10n, 5, "vatRate")).toBe(1n);
-    expect(calculateVatMinorUnits(50n, 21, "vatRate")).toBe(11n);
+  it("rounds exact half-cent VAT boundaries to the even cent", () => {
+    expect(calculateVatMinorUnits(10n, 5, "vatRate")).toBe(0n);
+    expect(calculateVatMinorUnits(30n, 5, "vatRate")).toBe(2n);
+    expect(calculateVatMinorUnits(50n, 21, "vatRate")).toBe(10n);
+    expect(calculateVatMinorUnits(150n, 21, "vatRate")).toBe(32n);
     expect(calculateVatMinorUnits(49n, 21, "vatRate")).toBe(10n);
+    expect(calculateVatMinorUnits(51n, 21, "vatRate")).toBe(11n);
+  });
+
+  it.each([
+    [0n, 4n, 0n],
+    [2n, 4n, 0n],
+    [6n, 4n, 2n],
+    [10n, 4n, 2n],
+    [14n, 4n, 4n],
+    [7n, 4n, 2n],
+    [9n, 4n, 2n],
+    [11n, 4n, 3n],
+  ] as const)("roundHalfEvenRatio(%s, %s) = %s", (numerator, denominator, expected) => {
+    expect(roundHalfEvenRatio(numerator, denominator)).toBe(expected);
+  });
+
+  it("rejects an invalid ratio", () => {
+    expect(() => roundHalfEvenRatio(-1n, 4n)).toThrowError(RangeError);
+    expect(() => roundHalfEvenRatio(1n, 0n)).toThrowError(RangeError);
   });
 
   it("rejects unsupported VAT rates", () => {

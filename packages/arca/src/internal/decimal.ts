@@ -125,8 +125,36 @@ export function calculateVatMinorUnits(
     });
   }
 
-  // Adding half the denominator implements deterministic half-up rounding.
-  return (taxableMinorUnits * basisPoints + 5000n) / 10_000n;
+  return roundHalfEvenRatio(taxableMinorUnits * basisPoints, 10_000n);
+}
+
+/**
+ * Divides two non-negative integers and rounds the quotient to the nearest
+ * integer, breaking exact ties toward the even neighbour.
+ *
+ * This is the rounding criterion the WSFE developer manual documents for the
+ * service ("Round Half Even", section on validation tolerances), so VAT
+ * derived here matches what ARCA computes for the same base and rate.
+ */
+export function roundHalfEvenRatio(
+  numerator: bigint,
+  denominator: bigint
+): bigint {
+  if (numerator < 0n || denominator <= 0n) {
+    throw new RangeError(
+      "roundHalfEvenRatio requires a non-negative numerator and a positive denominator."
+    );
+  }
+
+  const quotient = numerator / denominator;
+  const doubledRemainder = (numerator % denominator) * 2n;
+  if (doubledRemainder > denominator) {
+    return quotient + 1n;
+  }
+  if (doubledRemainder < denominator) {
+    return quotient;
+  }
+  return quotient % 2n === 0n ? quotient : quotient + 1n;
 }
 
 export function isWithinArcaTolerance(
