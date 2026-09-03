@@ -1,6 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import { ArcaSoapFaultError, ArcaTransportError } from "../errors";
+import { buildSoapEnvelope } from "../internal/xml";
 import { createWsmtxcaService } from "./wsmtxca";
+
+function expectSerializedAuthBefore(
+  bodyElementName: string,
+  body: Record<string, unknown>,
+  operationFieldName: string
+) {
+  const xml = buildSoapEnvelope(
+    "1.1",
+    bodyElementName,
+    "http://impl.service.wsmtxca.afip.gov.ar/service/",
+    body,
+    { namespaceMode: "prefix" }
+  );
+  const authIndex = xml.indexOf("<authRequest>");
+  const operationIndex = xml.indexOf(`<${operationFieldName}>`);
+
+  expect(authIndex).toBeGreaterThan(-1);
+  expect(operationIndex).toBeGreaterThan(authIndex);
+}
 
 function createBaseOptions() {
   return {
@@ -88,10 +108,13 @@ describe("createWsmtxcaService", () => {
         },
       },
     });
-    expect(Object.keys(options.soap.execute.mock.calls[0]?.[0].body)).toEqual([
-      "comprobanteCAERequest",
-      "authRequest",
-    ]);
+    const body = options.soap.execute.mock.calls[0]?.[0].body;
+    expect(Object.keys(body)).toEqual(["authRequest", "comprobanteCAERequest"]);
+    expectSerializedAuthBefore(
+      "autorizarComprobanteRequest",
+      body,
+      "comprobanteCAERequest"
+    );
   });
 
   it("rejects caller-provided WSMTXCA authentication before network work", async () => {
@@ -455,6 +478,11 @@ describe("createWsmtxcaService", () => {
         },
       },
     });
+    expectSerializedAuthBefore(
+      "consultarUltimoComprobanteAutorizadoRequest",
+      options.soap.execute.mock.calls[0]?.[0].body,
+      "consultaUltimoComprobanteAutorizadoRequest"
+    );
   });
 
   it("queries a specific voucher", async () => {
