@@ -171,12 +171,13 @@ export function createWsmtxcaService(
       bodyElementName: `${operation}Request`,
       bodyElementNamespaceMode: "prefix",
       body: {
-        ...body,
+        // WSMTXCA request types use an XML sequence with authentication first.
         authRequest: createWsmtxcaAuth(
           input.representedTaxId ?? options.config.taxId,
           auth.token,
           auth.sign
         ),
+        ...body,
       },
     });
 
