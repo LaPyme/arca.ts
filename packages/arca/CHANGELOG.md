@@ -1,5 +1,12 @@
 # facturas
 
+## 0.7.1
+
+### Patch Changes
+
+- ea2bf1a: Correct Factura B IVA calculations at exact half-cent boundaries to use ARCA's documented Round Half Even criterion.
+- 0dc9adf: Restore the schema-required WSMTXCA SOAP field order so `authRequest` is serialized before each operation payload.
+
 ## 0.7.0
 
 ### Minor Changes
