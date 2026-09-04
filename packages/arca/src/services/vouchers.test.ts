@@ -4,6 +4,7 @@ import { ArcaTransportError } from "../errors";
 import { createVouchersService } from "./vouchers";
 import type { IssueOptions } from "./vouchers-types";
 import {
+  type CreateWsfeServiceOptions,
   createWsfeService,
   normalizeWsfeVoucherInput,
   type WsfeAuthorizationOutcome,
@@ -394,6 +395,109 @@ describe("vouchers.issue", () => {
 });
 
 describe("facade with the real exact SOAP adapter", () => {
+  function createAdapter(soap: CreateWsfeServiceOptions["soap"]) {
+    return createWsfeService({
+      config: {
+        taxId: "20123456789",
+        certificatePem:
+          "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+        privateKeyPem:
+          "-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----",
+        environment: "test",
+        retries: 5,
+      },
+      auth: {
+        login: vi.fn().mockResolvedValue({
+          token: "token",
+          sign: "sign",
+          expiresAt: "2099-01-01T00:00:00Z",
+        }),
+      },
+      soap,
+    });
+  }
+
+  it.each([
+    ["missing", {}, "indeterminate"],
+    [
+      "malformed",
+      { CbteDesde: "invalid", CbteHasta: "invalid" },
+      "indeterminate",
+    ],
+    ["empty", { CbteDesde: "", CbteHasta: "" }, "indeterminate"],
+    ["zero", { CbteDesde: 0 }, "indeterminate"],
+    ["fractional", { CbteDesde: 77.5 }, "indeterminate"],
+    ["out of range", { CbteDesde: 100_000_000 }, "indeterminate"],
+    ["matching", { CbteDesde: 77, CbteHasta: 77 }, "authorized"],
+    ["matching fallback", { CbteHasta: 77 }, "authorized"],
+    ["different", { CbteDesde: 78, CbteHasta: 78 }, "conflict"],
+  ] as const)("classifies lookup number (%s) after timeout", async (_name, numbers, kind) => {
+    const execute = vi.fn(async ({ operation }: { operation: string }) => {
+      await Promise.resolve();
+      if (operation === "FECompUltimoAutorizado") {
+        return { result: { FECompUltimoAutorizadoResult: { CbteNro: 76 } } };
+      }
+      if (operation === "FECAESolicitar") {
+        throw new ArcaTransportError("Timeout");
+      }
+      expect(operation).toBe("FECompConsultar");
+      return {
+        result: {
+          FECompConsultarResult: {
+            ResultGet: {
+              ...numbers,
+              CbteFch: "20260904",
+              PtoVta: 1,
+              CbteTipo: 6,
+              Concepto: 1,
+              DocTipo: 99,
+              DocNro: 0,
+              CondicionIVAReceptorId: 5,
+              MonId: "PES",
+              MonCotiz: 1,
+              ImpTotal: 121,
+              ImpNeto: 100,
+              ImpIVA: 21,
+              ImpOpEx: 0,
+              ImpTotConc: 0,
+              ImpTrib: 0,
+              Iva: { AlicIva: { Id: 5, BaseImp: 100, Importe: 21 } },
+              Resultado: "A",
+              CodAutorizacion: "74123456789012",
+              FchVto: "20260914",
+            },
+          },
+        },
+      };
+    });
+    const wsfe = createAdapter({
+      execute: vi.fn().mockImplementation(execute),
+    });
+    const result = await createVouchersService(wsfe).issue(input);
+    expect(result.kind).toBe(kind);
+    if (kind === "indeterminate") {
+      expect(result).toMatchObject({
+        lookup: { kind: "incomplete", reason: "Cannot verify number" },
+      });
+    } else if (kind === "authorized") {
+      expect(result).toMatchObject({
+        recoveredByMatch: true,
+        voucher: { number: 77 },
+      });
+    } else {
+      expect(result).toMatchObject({
+        found: { number: 78 },
+        reason: expect.stringContaining("number differs"),
+      });
+    }
+    expect(execute.mock.calls.map(([call]) => call.operation)).toEqual([
+      "FECompUltimoAutorizado",
+      "FECAESolicitar",
+      "FECompConsultar",
+    ]);
+    expectNoRaw(result);
+  });
+
   it.each([
     "rejection",
     "transport",
@@ -441,24 +545,8 @@ describe("facade with the real exact SOAP adapter", () => {
         };
       }
     );
-    const wsfe = createWsfeService({
-      config: {
-        taxId: "20123456789",
-        certificatePem:
-          "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
-        privateKeyPem:
-          "-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----",
-        environment: "test",
-        retries: 5,
-      },
-      auth: {
-        login: vi.fn().mockResolvedValue({
-          token: "token",
-          sign: "sign",
-          expiresAt: "2099-01-01T00:00:00Z",
-        }),
-      },
-      soap: { execute: vi.fn().mockImplementation(execute) },
+    const wsfe = createAdapter({
+      execute: vi.fn().mockImplementation(execute),
     });
     const result = await createVouchersService(wsfe).issue(input);
     expect(result.kind).toBe(

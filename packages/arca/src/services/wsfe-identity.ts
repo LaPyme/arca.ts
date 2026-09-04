@@ -81,7 +81,7 @@ export function matchWsfeVoucherIdentity(
   const checks: [string, unknown, unknown, ((value: never) => unknown)?][] = [
     ["voucherType", sent.voucherType, found.voucherType],
     ["salesPoint", sent.salesPoint, found.salesPoint],
-    ["number", number, found.voucherNumber],
+    ["number", number, found.voucherNumber, normalizeVoucherNumber],
     [
       "date",
       sent.voucherDate,
@@ -194,6 +194,15 @@ function incompleteAuthorization(
     missing ??= "caeExpiry";
   }
   return missing;
+}
+
+function normalizeVoucherNumber(value: number): number {
+  // The exact lookup mapper maps missing/malformed numbers to 0 or NaN.
+  // Neither is evidence that a different voucher occupies the attempted number.
+  if (!Number.isSafeInteger(value) || value < 1 || value > 99_999_999) {
+    throw new Error("Invalid voucher number");
+  }
+  return value;
 }
 
 function normalizeDocument(value: string | number): bigint {

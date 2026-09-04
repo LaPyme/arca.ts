@@ -97,6 +97,36 @@ describe("WSFE identity matcher", () => {
   });
 
   it.each([
+    0,
+    -1,
+    77.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    100_000_000,
+    Number.MAX_SAFE_INTEGER + 1,
+  ])("treats invalid voucher number %s as incomplete evidence", (voucherNumber) => {
+    expect(
+      matchWsfeVoucherIdentity(sent, 77, { ...voucher(), voucherNumber })
+    ).toEqual({
+      matches: false,
+      evidence: "incomplete",
+      reason: "Cannot verify number",
+    });
+  });
+
+  it.each([
+    1, 99_999_999,
+  ])("matches valid voucher number boundary %s", (number) => {
+    expect(
+      matchWsfeVoucherIdentity(sent, number, {
+        ...voucher(),
+        voucherNumber: number,
+      })
+    ).toEqual({ matches: true });
+  });
+
+  it.each([
     "baseAmount",
     "amount",
   ] as const)("detects a one-cent VAT %s mismatch", (field) => {
