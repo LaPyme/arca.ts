@@ -1,17 +1,13 @@
-import {
-  ARCA_CURRENCY_IDS,
-  ARCA_VAT_RATES,
-  ARCA_VOUCHER_TYPES,
-} from "../constants";
+import { ARCA_CURRENCY_IDS, ARCA_VOUCHER_TYPES } from "../constants";
 import { ArcaInputError } from "../errors";
 import {
-  arcaMinorUnitsToNumber,
   assertArcaMinorUnits,
   calculateVatMinorUnits,
   type SupportedVatRate,
   serializeArcaExchangeRate,
 } from "../internal/decimal";
-import type { WsfeDateInput, WsfeVatRate, WsfeVoucherInput } from "./wsfe";
+import type { WsfeDateInput, WsfeVoucherInput } from "./wsfe";
+import { calculateWsfeAmounts } from "./wsfe-amounts";
 
 export type WsfeBuilderCurrencyInput =
   | {
@@ -56,15 +52,6 @@ export type BuildFacturaCInput = WsfeInvoiceBuilderBaseInput &
     amount: number;
   };
 
-const VAT_RATE_IDS: Record<SupportedVatRate, number> = {
-  0: ARCA_VAT_RATES.IVA_0,
-  2.5: ARCA_VAT_RATES.IVA_2_5,
-  5: ARCA_VAT_RATES.IVA_5,
-  10.5: ARCA_VAT_RATES.IVA_10_5,
-  21: ARCA_VAT_RATES.IVA_21,
-  27: ARCA_VAT_RATES.IVA_27,
-};
-
 /** Builds a narrow Factura B exact WSFE input from integer currency minor units. */
 export function buildFacturaB(input: BuildFacturaBInput): WsfeVoucherInput {
   const taxableMinorUnits = assertArcaMinorUnits(
@@ -87,17 +74,6 @@ export function buildFacturaB(input: BuildFacturaBInput): WsfeVoucherInput {
     input.vatRate,
     "vatRate"
   );
-  const totalMinorUnits = taxableMinorUnits + vatMinorUnits;
-  const vatRateId = VAT_RATE_IDS[input.vatRate];
-
-  if (vatRateId === undefined) {
-    throw new ArcaInputError("vatRate is not a supported VAT rate.", {
-      code: "ARCA_INPUT_INVALID_VALUE",
-      field: "vatRate",
-      expected: "one of 0, 2.5, 5, 10.5, 21, or 27",
-    });
-  }
-
   if (input.vatRate !== 0 && vatMinorUnits === 0n) {
     throw new ArcaInputError(
       "taxableAmount is too small to produce VAT at the selected positive vatRate.",
@@ -110,43 +86,32 @@ export function buildFacturaB(input: BuildFacturaBInput): WsfeVoucherInput {
     );
   }
 
-  const vatRates: WsfeVatRate[] = [
-    Object.freeze({
-      id: vatRateId,
-      baseAmount: arcaMinorUnitsToNumber(taxableMinorUnits, "taxableAmount"),
-      amount: arcaMinorUnitsToNumber(vatMinorUnits, "vatAmount"),
-    }),
-  ];
-  Object.freeze(vatRates);
-
+  const { data } = calculateWsfeAmounts({
+    issuer: "responsable_inscripto",
+    items: [{ net: input.taxableAmount, vat: input.vatRate }],
+  });
+  for (const rate of data.vatRates ?? []) {
+    Object.freeze(rate);
+  }
+  Object.freeze(data.vatRates);
   return Object.freeze({
     ...buildCommonExactInput(input),
     voucherType: ARCA_VOUCHER_TYPES.FACTURA_B,
-    totalAmount: arcaMinorUnitsToNumber(totalMinorUnits, "totalAmount"),
-    nonTaxableAmount: 0,
-    netAmount: arcaMinorUnitsToNumber(taxableMinorUnits, "taxableAmount"),
-    exemptAmount: 0,
-    taxAmount: 0,
-    vatAmount: arcaMinorUnitsToNumber(vatMinorUnits, "vatAmount"),
-    vatRates,
+    ...data,
   });
 }
 
 /** Builds a narrow Factura C exact WSFE input from integer currency minor units. */
 export function buildFacturaC(input: BuildFacturaCInput): WsfeVoucherInput {
-  const amountMinorUnits = assertArcaMinorUnits(input.amount, "amount");
-  const amount = arcaMinorUnitsToNumber(amountMinorUnits, "amount");
-
+  assertArcaMinorUnits(input.amount, "amount");
+  const { data } = calculateWsfeAmounts({
+    issuer: "monotributo",
+    items: [{ amount: input.amount }],
+  });
   return Object.freeze({
     ...buildCommonExactInput(input),
     voucherType: ARCA_VOUCHER_TYPES.FACTURA_C,
-    totalAmount: amount,
-    nonTaxableAmount: 0,
-    // ARCA defines ImpNeto as the subtotal for class C vouchers.
-    netAmount: amount,
-    exemptAmount: 0,
-    taxAmount: 0,
-    vatAmount: 0,
+    ...data,
   });
 }
 

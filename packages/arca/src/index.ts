@@ -10,10 +10,22 @@ export {
   resolveArcaEnvironment,
 } from "./config";
 export type {
+  IssuerCondition,
+  ReceiverCondition,
+  VoucherClass,
+} from "./constants";
+export {
+  ARCA_FINAL_CONSUMER_IDENTIFICATION_THRESHOLD_MINOR_UNITS,
+  ARCA_INVOICE_CLASS_BY_ISSUER,
+  ARCA_ISSUER_CONDITION_IDS,
+  ARCA_RECEIVER_CONDITION_IDS,
+} from "./constants";
+export type {
   ArcaAuthenticationErrorOptions,
   ArcaAuthenticationReason,
   ArcaInputErrorCode,
   ArcaInputErrorOptions,
+  ArcaSafeErrorMetadata,
 } from "./errors";
 export {
   ArcaAuthenticationError,
@@ -25,6 +37,7 @@ export {
   ArcaSoapFaultError,
   ArcaTransportError,
   isArcaAuthenticationError,
+  toArcaSafeErrorMetadata,
 } from "./errors";
 export type {
   ArcaAuthenticationEvidence,
@@ -43,6 +56,12 @@ export type {
   PadronTaxpayerResult,
 } from "./services/padron";
 export { createPadronService } from "./services/padron";
+export type { VouchersService } from "./services/vouchers";
+export type {
+  IssuedVoucher,
+  IssueOptions,
+  IssueOutcome,
+} from "./services/vouchers-types";
 export type {
   CreateWsfeServiceOptions,
   WsfeActivity,
@@ -70,12 +89,25 @@ export type {
 } from "./services/wsfe";
 export { createWsfeService } from "./services/wsfe";
 export type {
+  AmountItem,
+  IssueAmounts,
+  VatItem,
+  VatRate,
+} from "./services/wsfe-amounts";
+export type {
   BuildFacturaBInput,
   BuildFacturaCInput,
   WsfeBuilderCurrencyInput,
   WsfeBuilderVatRate,
 } from "./services/wsfe-builders";
 export { buildFacturaB, buildFacturaC } from "./services/wsfe-builders";
+export type { IssueCommon, IssueInput, Receiver } from "./services/wsfe-derive";
+export type {
+  VoucherCoordinates,
+  VoucherSummary,
+  WsfeIdentityMatch,
+} from "./services/wsfe-identity";
+export { matchWsfeVoucherIdentity } from "./services/wsfe-identity";
 export type {
   CreateWsmtxcaServiceOptions,
   WsmtxcaAuthorizationOutcome,

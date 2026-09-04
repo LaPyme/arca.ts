@@ -2014,3 +2014,102 @@ describe("createWsfeService", () => {
     });
   });
 });
+
+// Synthetic service-date/Tributos extensions of the recorded two-rate amount case.
+// No private request journal or live CAE is used by these fixtures.
+describe("WSFE consultation details for identity matching", () => {
+  const resultGet = {
+    CbteDesde: 77,
+    CbteHasta: 77,
+    CbteFch: "20260904",
+    PtoVta: 1,
+    CbteTipo: 6,
+    Concepto: 2,
+    DocTipo: 99,
+    DocNro: "0",
+    CondicionIVAReceptorId: 5,
+    ImpTotal: 233.49,
+    ImpTotConc: 0,
+    ImpNeto: 200,
+    ImpOpEx: 0,
+    ImpTrib: 2,
+    ImpIVA: 31.49,
+    MonId: "PES",
+    MonCotiz: 1,
+    Resultado: "A",
+    CodAutorizacion: "74123456789012",
+    FchVto: "20260914",
+    Iva: {
+      AlicIva: [
+        { Id: 5, BaseImp: 100, Importe: 21 },
+        { Id: 4, BaseImp: 100, Importe: 10.5 },
+      ],
+    },
+    FchServDesde: "20260901",
+    FchServHasta: "20260930",
+    FchVtoPago: "20261001",
+    Tributos: {
+      Tributo: {
+        Id: 99,
+        Desc: "Fixture tax",
+        BaseImp: 200,
+        Alic: 1,
+        Importe: 2,
+      },
+    },
+  };
+  it("maps multiple VAT rates, service dates and a single tax from FECompConsultar", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FECompConsultar", { ResultGet: resultGet })
+    );
+    const found = await createWsfeService(options).lookupVoucher({
+      number: 77,
+      salesPoint: 1,
+      voucherType: 6,
+    });
+    expect(found).toMatchObject({
+      kind: "found",
+      voucher: {
+        vatRates: [
+          { id: 5, baseAmount: 100, amount: 21 },
+          { id: 4, baseAmount: 100, amount: 10.5 },
+        ],
+        serviceStartDate: "20260901",
+        serviceEndDate: "20260930",
+        paymentDueDate: "20261001",
+        taxes: [
+          {
+            id: 99,
+            description: "Fixture tax",
+            baseAmount: 200,
+            rate: 1,
+            amount: 2,
+          },
+        ],
+      },
+    });
+  });
+  it.each([
+    undefined,
+    {},
+    { AlicIva: [{ Id: 5, BaseImp: 100 }] },
+    { AlicIva: [null] },
+  ])("keeps missing or malformed VAT details absent: %j", async (Iva) => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce(
+      createWsfeOperationResult("FECompConsultar", {
+        ResultGet: { ...resultGet, Iva },
+      })
+    );
+    const found = await createWsfeService(options).lookupVoucher({
+      number: 77,
+      salesPoint: 1,
+      voucherType: 6,
+    });
+    if (found.kind !== "found") {
+      throw new Error("Fixture must be found");
+    }
+    expect(found.voucher).not.toHaveProperty("vatRates");
+  });
+});

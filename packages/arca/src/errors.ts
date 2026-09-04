@@ -232,3 +232,25 @@ function normalizeProviderCode(
   }
   return undefined;
 }
+
+/** Narrow error evidence: never includes a cause, raw response or stack. */
+export type ArcaSafeErrorMetadata = {
+  name: string;
+  message: string;
+  code?: string;
+  statusCode?: number;
+};
+
+export function toArcaSafeErrorMetadata(error: unknown): ArcaSafeErrorMetadata {
+  if (!(error instanceof Error)) {
+    return { name: "UnknownError", message: String(error) };
+  }
+  return {
+    name: error.name,
+    message: error.message,
+    ...(error instanceof ArcaError ? { code: error.code } : {}),
+    ...(error instanceof ArcaTransportError && error.statusCode !== undefined
+      ? { statusCode: error.statusCode }
+      : {}),
+  };
+}
