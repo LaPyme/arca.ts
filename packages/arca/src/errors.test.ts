@@ -310,3 +310,34 @@ describe("errors", () => {
     expect(JSON.stringify(error)).not.toMatch(/token-value|sign-value/);
   });
 });
+
+// Projection coverage lives beside the error classes to keep the raw-free boundary explicit.
+describe("toArcaSafeErrorMetadata", () => {
+  it("excludes raw bodies, causes, stacks and arbitrary properties", async () => {
+    const { toArcaSafeErrorMetadata } = await import("./errors");
+    const error = new ArcaTransportError("Unavailable", {
+      statusCode: 503,
+      cause: new Error("private"),
+      responseBodyPreview: "private",
+    });
+    Object.assign(error, { raw: { private: true } });
+    expect(toArcaSafeErrorMetadata(error)).toEqual({
+      name: "ArcaTransportError",
+      message: "Unavailable",
+      code: "ARCA_TRANSPORT_ERROR",
+      statusCode: 503,
+    });
+    expect(toArcaSafeErrorMetadata(new Error("Oops"))).toEqual({
+      name: "Error",
+      message: "Oops",
+    });
+    expect(toArcaSafeErrorMetadata(null)).toEqual({
+      name: "UnknownError",
+      message: "null",
+    });
+    expect(toArcaSafeErrorMetadata("failure")).toEqual({
+      name: "UnknownError",
+      message: "failure",
+    });
+  });
+});

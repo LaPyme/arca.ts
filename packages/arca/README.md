@@ -29,10 +29,22 @@ The package exports:
 - `facturas/errors`
 - `facturas/types`
 
-The primary WSFE path uses `buildFacturaB()` or `buildFacturaC()` with integer
-minor-unit amounts and ISO `ARS`/`USD` currency input. The builders are exported
-from both `facturas` and `facturas/wsfe`. Advanced exact `WsfeVoucherInput`
-requests continue to use ARCA currency identifiers such as `PES` and `DOL`.
+The primary invoice path is `client.vouchers.issue()`, using an explicit
+`issuer`, a fiscal `to` receiver, a required `salesPoint`, and integer-minor-unit
+items. It derives A/B/C, VAT and totals, and returns `authorized`, `rejected`,
+`indeterminate`, or `conflict`. Raw provider evidence is opt-in.
+
+**Single-writer contract:** serialize per `(representedTaxId, salesPoint,
+voucherType)`. The SDK does not coordinate writers; concurrent calls collide on
+10016. Servers and queues must persist attempts and use
+`client.wsfe.authorizeVoucherOutcome()` directly. The facade makes one write
+attempt and at most one identity-matched recovery lookup, never a resubmission.
+
+`buildFacturaB()` and `buildFacturaC()` retain their v0.7.1 behavior and are
+exported from `facturas` and `facturas/wsfe`. The facade and builders accept ISO
+`ARS`/`USD`; exact `WsfeVoucherInput` uses provider identifiers `PES`/`DOL`.
+The only existing type widening in v0.8 is required `ArcaClient.vouchers`;
+hand-built typed mocks must add that member.
 
 `facturas` also exports `createMemoryWsaaSessionStore()` for tests/local single-process coordination and the small `ArcaWsaaSessionStore` interface for applications that need to share WSAA tickets across workers through their own durable store.
 

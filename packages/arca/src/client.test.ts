@@ -120,6 +120,7 @@ describe("createArcaClient", () => {
         retryDelay: config.retryDelay,
       },
       wsfe,
+      vouchers: { issue: expect.any(Function) },
       wsmtxca,
       padron,
     });

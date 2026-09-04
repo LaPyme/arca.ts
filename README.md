@@ -25,6 +25,122 @@ npm install facturas
 
 ## Quick start
 
+This example mirrors [examples/issue-invoice.ts](./examples/issue-invoice.ts).
+Replace the credentials and confirm the issuer and receiver assertions before running it.
+
+```ts
+import { createArcaClient } from "facturas";
+
+const client = createArcaClient({
+  taxId: "20123456789",
+  certificatePem:
+    "-----BEGIN CERTIFICATE-----\nREPLACE_WITH_YOUR_CERTIFICATE\n-----END CERTIFICATE-----",
+  privateKeyPem:
+    "-----BEGIN PRIVATE KEY-----\nREPLACE_WITH_YOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----",
+  environment: "test",
+});
+
+const outcome = await client.vouchers.issue({
+  issuer: "responsable_inscripto",
+  salesPoint: 1,
+  to: { condition: "consumidor_final" },
+  items: [
+    { gross: 12_100, vat: 21 }, // ARS 121.00, VAT included.
+    { net: 10_000, vat: 10.5 }, // ARS 100.00 before VAT.
+  ],
+});
+
+switch (outcome.kind) {
+  case "authorized":
+    console.log(outcome.voucher.cae, outcome.voucher.number);
+    break;
+  case "rejected":
+    console.error(outcome.attempted, outcome.issues);
+    break;
+  case "indeterminate":
+    // Preserve this number and evidence. Reconcile before another attempt.
+    console.error(outcome.attempted, outcome.attempt, outcome.lookup);
+    break;
+  case "conflict":
+    // Another voucher occupies the attempted number. Stop and investigate.
+    console.error(outcome.attempted, outcome.found, outcome.reason);
+    break;
+  default:
+    outcome satisfies never;
+}
+```
+
+> **Single-writer contract:** serialize calls per `(representedTaxId, salesPoint,
+> voucherType)`, including concurrent promises within one process. The SDK does
+> not coordinate writers. Uncoordinated calls collide on ARCA 10016. Servers and
+> queues should persist their attempted number and exact request, and use
+> `client.wsfe.authorizeVoucherOutcome()` directly.
+
+The issuer is your legal assertion on each call; the SDK never infers it from
+items or Padrón. An RI issuer produces A for RI or Monotributo receivers and B
+for the other supported conditions. Monotributo, Exento and No Alcanzado issuers
+produce C and use `items: [{ amount: 10_000 }]`. ARCA validates actual eligibility.
+`to` is the fiscal receiver (the exact layer's receiver document/condition fields),
+not a customer record.
+
+Amounts are integer minor units. For RI items, choose `net` or `gross` on each
+item and one of `0 | 2.5 | 5 | 10.5 | 21 | 27 | "exempt" | "untaxed"` for `vat`.
+Numeric zero is a VAT rate; exempt and untaxed amounts have separate fiscal
+fields. Items are grouped by rate before Round Half Even rounding.
+
+`total`, when supplied, asserts the sent total. The SDK adjusts header VAT only
+within one cent per emitted numeric rate, while keeping VAT non-negative.
+Class C totals must match exactly. Authorized results expose `computedTotal`,
+`sentTotal` and `vatAdjustment` in `voucher.amounts`, all in minor units.
+
+The defaults are today's date in Buenos Aires, goods (concept 1), and `ARS` at
+exchange rate `1`. Use `currency: "USD"` with a positive decimal-string
+`exchangeRate`, or `service: { from, to, dueDate }` for concept 2. Dates accept
+`YYYY-MM-DD` or `YYYYMMDD`; service end must follow its start and the payment due
+date must be on or after the invoice date.
+
+Non-final-consumer receivers require an 11-digit `cuit`. A final consumer accepts
+one `cuit` or `dni`, or neither below the identification threshold. At or above
+ARS 10,000,000 (including USD converted at the supplied rate), identification is
+required under [RG 5866/2026](https://www.argentina.gob.ar/normativa/nacional/norma-427092/texto).
+When the customer requests a CUIT for an income-tax deduction, supply it regardless
+of amount. Document shape checks do not verify provider registration.
+
+### Facade fiscal contract
+
+Each valid call invokes one `FECompUltimoAutorizado` read and one
+`FECAESolicitar` authorization attempt, with zero transport retries on the write.
+An indeterminate authorization adds one `lookupVoucher()` call
+(`FECompConsultar`). There is never a resubmission, even after `not_found`.
+The existing exact read methods retain their transport/authentication recovery
+policy. Invalid input throws `ArcaInputError` before provider I/O; a failed
+next-number read also throws before any write.
+
+| Outcome | Meaning and caller action |
+| --- | --- |
+| `authorized` | CAE and expiry are present. Save the voucher. `recoveredByMatch: true` means a complete lookup matched the sent identity; it proves consistency, not authorship. |
+| `rejected` | ARCA explicitly rejected the request. Review `issues` and correct the cause before a deliberate new attempt. |
+| `indeterminate` | The write's outcome remains uncertain: lookup was absent, incomplete or failed. Preserve `attempted` and the evidence; reconcile that number before issuing again. |
+| `conflict` | The lookup differs from the sent identity. Stop this sequence and investigate the competing writer or incorrect request. Do not resubmit automatically. |
+
+Every fiscal outcome is returned. Provider evidence is normalized and raw-free
+by default. The second argument accepts `representedTaxId`, `forceRefresh`, and
+`include: { raw: true, exactInput: true }`. Raw evidence appears only when requested;
+`sent` appears only on authorized outcomes with `exactInput` enabled. This opt-in
+is useful for retaining a successful exact input; durable attempts must use the
+exact API so they can be persisted **before** sending.
+
+`matchWsfeVoucherIdentity(sent, number, found)` is a pure exported helper for
+this invoice subset. It compares coordinates, date, concept, receiver, currency,
+all header amounts, each VAT rate and service dates. Missing fields or missing
+authorization evidence remain incomplete; differences are conflicts. Unsupported
+exact extensions (such as associated vouchers or tributes) are incomplete.
+
+Notes, tributes, FCE, concept 3, same-currency foreign cancellation, WSMTXCA and
+other receiver conditions remain available through the exact APIs.
+
+## Exact control
+
 This example mirrors [examples/factura-b-consumidor-final.ts](./examples/factura-b-consumidor-final.ts).
 
 ```ts
@@ -95,7 +211,8 @@ const usdData = buildFacturaB({
 
 ### WSFE
 
-- Issue invoices and credit notes with `client.wsfe.createNextVoucher(...)`
+- Build A/B/C invoices from explicit assertions with the single-writer facade above
+- Issue invoices and credit notes with the existing exact WSFE methods
 - Query voucher numbers and voucher details
 - Read ARCA catalogs with methods like `getVoucherTypes()` and `getVatRates()`
 - Check backend health with `getServerStatus()`
@@ -160,8 +277,9 @@ Exact lookup absence is operation-specific:
 
 The SDK normalizes provider protocol evidence only. Your application remains responsible for persisting the exact request, owning its sequence or lane, and deciding when a retry is safe.
 
-For exemptions, non-taxable amounts, tributes, multiple IVA rates, notes, or
-other advanced cases, use the exact `WsfeVoucherInput` escape hatch. Exact
+For tributes, notes, FCE, or other advanced cases, use the exact
+`WsfeVoucherInput` escape hatch. It also continues to support exemptions,
+non-taxable amounts and multiple IVA rates. Exact
 amounts remain major-unit numbers, are validated locally, and are serialized as
 canonical two-decimal strings:
 
@@ -197,7 +315,7 @@ const exactData: WsfeVoucherInput = {
 ```
 
 Exact inputs and live catalog responses use ARCA protocol identifiers such as
-`PES` and `DOL`; only the high-level builders accept ISO `ARS` and `USD`.
+`PES` and `DOL`; the facade and high-level builders accept ISO `ARS` and `USD`.
 
 ### Migrating amount and currency inputs
 
@@ -590,3 +708,11 @@ Optional for local DX: install Turbo globally with `pnpm add --global turbo`. Th
 ## License
 
 Apache-2.0
+
+## v0.8 compatibility
+
+No existing export changes name, signature or runtime behavior. The shared money
+core preserves the v0.7.1 builders, including Half Even ties and frozen outputs.
+The one declared type widening is the required `ArcaClient.vouchers` member:
+hand-built `ArcaClient` mocks must add it. Clients returned by `createArcaClient()`
+receive it automatically. v0.8.0 is a minor release.

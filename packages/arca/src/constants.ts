@@ -67,3 +67,68 @@ export const ARCA_CURRENCIES = {
   PES: "PES",
   DOL: "DOL",
 } as const;
+
+/** Legal assertions supported by the invoice facade; never inferred from Padrón. */
+export type IssuerCondition =
+  | "responsable_inscripto"
+  | "monotributo"
+  | "exento"
+  | "no_alcanzado";
+export type ReceiverCondition = IssuerCondition | "consumidor_final";
+export type VoucherClass = "A" | "B" | "C";
+
+export const ARCA_RECEIVER_CONDITION_IDS = {
+  responsable_inscripto: ARCA_RECEIVER_VAT_CONDITIONS.RESPONSABLE_INSCRIPTO,
+  monotributo: ARCA_RECEIVER_VAT_CONDITIONS.MONOTRIBUTISTA,
+  exento: ARCA_RECEIVER_VAT_CONDITIONS.EXENTO,
+  consumidor_final: ARCA_RECEIVER_VAT_CONDITIONS.CONSUMIDOR_FINAL,
+  no_alcanzado: ARCA_RECEIVER_VAT_CONDITIONS.IVA_NO_ALCANZADO,
+} as const satisfies Record<ReceiverCondition, number>;
+
+export const ARCA_ISSUER_CONDITION_IDS = {
+  responsable_inscripto: 1,
+  monotributo: 6,
+  exento: 4,
+  no_alcanzado: 15,
+} as const satisfies Record<IssuerCondition, number>;
+
+// RG 5866/2026, art. 1(f), effective 2026-07-01 (art. 4).
+// https://www.argentina.gob.ar/normativa/nacional/norma-427092/texto
+export const ARCA_FINAL_CONSUMER_IDENTIFICATION_THRESHOLD_MINOR_UNITS =
+  1_000_000_000n;
+
+// WSFE v4.7, physical PDF p. 203, validations 10243/10246; issuer asserted first.
+// ARCA checks actual issuer eligibility independently at authorization.
+export const ARCA_INVOICE_CLASS_BY_ISSUER = {
+  responsable_inscripto: {
+    responsable_inscripto: "A",
+    monotributo: "A",
+    exento: "B",
+    consumidor_final: "B",
+    no_alcanzado: "B",
+  },
+  monotributo: {
+    responsable_inscripto: "C",
+    monotributo: "C",
+    exento: "C",
+    consumidor_final: "C",
+    no_alcanzado: "C",
+  },
+  exento: {
+    responsable_inscripto: "C",
+    monotributo: "C",
+    exento: "C",
+    consumidor_final: "C",
+    no_alcanzado: "C",
+  },
+  no_alcanzado: {
+    responsable_inscripto: "C",
+    monotributo: "C",
+    exento: "C",
+    consumidor_final: "C",
+    no_alcanzado: "C",
+  },
+} as const satisfies Record<
+  IssuerCondition,
+  Record<ReceiverCondition, VoucherClass>
+>;

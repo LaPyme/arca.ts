@@ -162,6 +162,11 @@ export type WsfeVoucherInfo = {
   result?: string;
   cae?: string;
   caeExpiry?: string;
+  vatRates?: WsfeVatRate[];
+  serviceStartDate?: string;
+  serviceEndDate?: string;
+  paymentDueDate?: string;
+  taxes?: WsfeTax[];
   raw: Record<string, unknown>;
 };
 
@@ -983,7 +988,7 @@ function mapWsfeVoucherInput(
   return data;
 }
 
-function normalizeWsfeVoucherInput(
+export function normalizeWsfeVoucherInput(
   input: WsfeVoucherInput
 ): NormalizedWsfeVoucherInput {
   if (input.receiverVatConditionId === undefined) {
@@ -1314,7 +1319,7 @@ function normalizeWsfeExchangeRate(
   return serializeArcaExchangeRate(exchangeRate, "exchangeRate");
 }
 
-function normalizeWsfeDateInput(
+export function normalizeWsfeDateInput(
   value: WsfeDateInput,
   fieldName: string
 ): string {
@@ -1490,7 +1495,82 @@ function mapWsfeVoucherInfo(raw: Record<string, unknown>): WsfeVoucherInfo {
     normalizeWsfeString(raw.FchVto ?? raw.CAEFchVto)
   );
 
+  assignWsfeValue(
+    voucher,
+    "serviceStartDate",
+    normalizeWsfeString(raw.FchServDesde)
+  );
+  assignWsfeValue(
+    voucher,
+    "serviceEndDate",
+    normalizeWsfeString(raw.FchServHasta)
+  );
+  assignWsfeValue(
+    voucher,
+    "paymentDueDate",
+    normalizeWsfeString(raw.FchVtoPago)
+  );
+  assignWsfeValue(
+    voucher,
+    "vatRates",
+    mapWsfeLookupDetails(raw.Iva, "AlicIva", mapWsfeLookupVat)
+  );
+  assignWsfeValue(
+    voucher,
+    "taxes",
+    mapWsfeLookupDetails(raw.Tributos, "Tributo", mapWsfeLookupTax)
+  );
+
   return voucher;
+}
+
+// A missing or malformed detail stays absent; never fabricate zero-valued identity evidence.
+function mapWsfeLookupDetails<T>(
+  container: unknown,
+  key: string,
+  map: (row: Record<string, unknown>) => T | undefined
+): T[] | undefined {
+  const record = toWsfeRecord(container);
+  if (!record || record[key] === undefined) {
+    return undefined;
+  }
+  const rows = Array.isArray(record[key]) ? record[key] : [record[key]];
+  const result: T[] = [];
+  for (const value of rows) {
+    const row = toWsfeRecord(value);
+    const mapped = row ? map(row) : undefined;
+    if (mapped === undefined) {
+      return undefined;
+    }
+    result.push(mapped);
+  }
+  return result;
+}
+
+function mapWsfeLookupVat(
+  row: Record<string, unknown>
+): WsfeVatRate | undefined {
+  const id = normalizeWsfeNumber(row.Id);
+  const baseAmount = normalizeWsfeNumber(row.BaseImp);
+  const amount = normalizeWsfeNumber(row.Importe);
+  if (id === undefined || baseAmount === undefined || amount === undefined) {
+    return undefined;
+  }
+  return { id, baseAmount, amount };
+}
+
+function mapWsfeLookupTax(row: Record<string, unknown>): WsfeTax | undefined {
+  const vat = mapWsfeLookupVat(row);
+  const rate = normalizeWsfeNumber(row.Alic);
+  if (!vat || rate === undefined) {
+    return undefined;
+  }
+  const description = normalizeWsfeString(row.Desc);
+  return {
+    ...vat,
+    rate,
+    ...(description === undefined ? {} : { description }),
+  };
 }
 
 function createWsfeAuth(

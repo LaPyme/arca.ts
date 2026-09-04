@@ -2,6 +2,10 @@ import { assertArcaClientConfig, normalizeArcaClientConfig } from "./config";
 import { createArcaLogger } from "./internal/logger";
 import type { ArcaClientConfig, ArcaEnvironment } from "./internal/types";
 import { createPadronService, type PadronService } from "./services/padron";
+import {
+  createVouchersService,
+  type VouchersService,
+} from "./services/vouchers";
 import { createWsfeService, type WsfeService } from "./services/wsfe";
 import { createWsmtxcaService, type WsmtxcaService } from "./services/wsmtxca";
 import { createSoapTransport } from "./soap";
@@ -20,6 +24,7 @@ export type ArcaClientConfigView = Readonly<{
 export type ArcaClient = {
   readonly config: ArcaClientConfigView;
   wsfe: WsfeService;
+  vouchers: VouchersService;
   wsmtxca: WsmtxcaService;
   padron: PadronService;
 };
@@ -27,7 +32,7 @@ export type ArcaClient = {
 /**
  * Creates an ARCA client from the given configuration.
  * Validates the config, wires WSAA authentication and SOAP transport,
- * and returns an object with `.wsfe`, `.wsmtxca`, and `.padron` service modules.
+ * and returns an object with `.vouchers`, `.wsfe`, `.wsmtxca`, and `.padron` service modules.
  *
  * @throws {ArcaConfigurationError} When the config is missing or invalid.
  */
@@ -46,9 +51,11 @@ export function createArcaClient(config: ArcaClientConfig): ArcaClient {
     retryDelay: normalizedConfig.retryDelay,
   });
 
+  const wsfe = createWsfeService({ config: normalizedConfig, auth, soap });
   return {
     config: publicConfig,
-    wsfe: createWsfeService({ config: normalizedConfig, auth, soap }),
+    wsfe,
+    vouchers: createVouchersService(wsfe),
     wsmtxca: createWsmtxcaService({ config: normalizedConfig, auth, soap }),
     padron: createPadronService({ config: normalizedConfig, auth, soap }),
   };
