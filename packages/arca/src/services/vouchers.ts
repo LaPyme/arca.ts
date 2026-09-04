@@ -20,10 +20,13 @@ import type {
   IssueOutcome,
 } from "./vouchers-types";
 import {
+  normalizeWsfeDateInput,
   normalizeWsfeVoucherInput,
+  type WsfeDateInput,
   type WsfeService,
   type WsfeVoucherInput,
 } from "./wsfe";
+import { deriveWsfeCancellation } from "./wsfe-cancel";
 import {
   assertIssueKeys,
   assertIssueObject,
@@ -38,6 +41,10 @@ import {
 } from "./wsfe-identity";
 
 export type VouchersService = {
+  /** Creates a full credit note associated to an authorized A, B or C invoice. */
+  cancel<
+    O extends IssueOptions & { date?: WsfeDateInput } = { include?: never },
+  >(target: VoucherCoordinates, options?: O): Promise<IssueOutcome<O>>;
   /**
    * Configure a store and pass idempotencyKey to recover retries after a crash.
    *
@@ -67,6 +74,15 @@ export function createVouchersService(
   context?: StoreContext
 ): VouchersService {
   return {
+    cancel: async <
+      O extends IssueOptions & { date?: WsfeDateInput } = { include?: never },
+    >(
+      target: VoucherCoordinates,
+      options?: O
+    ): Promise<IssueOutcome<O>> => {
+      const result = await cancelInvoice(wsfe, target, options ?? {}, context);
+      return result as IssueOutcome<O>;
+    },
     issue: async <O extends IssueOptions = { include?: never }>(
       input: IssueInput,
       options?: O
@@ -582,4 +598,74 @@ function replayEvidence(): RecoveryInput["attempt"] {
     errors: [],
     observations: [],
   };
+}
+
+async function cancelInvoice(
+  wsfe: IssueWsfeService,
+  target: VoucherCoordinates,
+  options: IssueOptions & { date?: WsfeDateInput },
+  context?: StoreContext
+): Promise<IssueOutcome<IssueOptions>> {
+  assertIssueObject(options, "options");
+  const { date, ...issueOptions } = options;
+  validateOptions(issueOptions);
+  validateKeyStore(issueOptions, context);
+  assertIssueObject(target, "target");
+  for (const [field, max] of [
+    ["salesPoint", 99_999],
+    ["voucherType", 999],
+    ["number", 99_999_999],
+  ] as const) {
+    if (
+      !Number.isSafeInteger(target[field]) ||
+      target[field] < 1 ||
+      target[field] > max
+    ) {
+      throw new ArcaInputError(`Invalid cancel target ${field}.`, {
+        code: "ARCA_INPUT_INVALID_VALUE",
+        field,
+      });
+    }
+  }
+  if (![1, 6, 11].includes(target.voucherType)) {
+    throw new ArcaInputError(
+      "cancel requires an invoice of type 1, 6 or 11; use wsfe.authorizeVoucherOutcome() for exact control.",
+      { code: "ARCA_INPUT_INVALID_VALUE" }
+    );
+  }
+  if (date !== undefined) {
+    normalizeWsfeDateInput(date, "date");
+  }
+  return await runOperation(
+    wsfe,
+    "cancel",
+    { target, date },
+    async () => {
+      const original = await wsfe.lookupVoucher({
+        representedTaxId: issueOptions.representedTaxId,
+        forceRefresh: issueOptions.forceRefresh,
+        salesPoint: target.salesPoint,
+        voucherType: target.voucherType,
+        number: target.number,
+      });
+      if (original.kind === "not_found") {
+        throw new ArcaInputError("original voucher not found", {
+          code: "ARCA_INPUT_INVALID_VALUE",
+        });
+      }
+      if (
+        original.voucher.salesPoint !== target.salesPoint ||
+        original.voucher.voucherType !== target.voucherType ||
+        original.voucher.voucherNumber !== target.number
+      ) {
+        throw new ArcaInputError(
+          "Original lookup coordinates do not match the cancel target.",
+          { code: "ARCA_INPUT_INVALID_VALUE" }
+        );
+      }
+      return deriveWsfeCancellation(original.voucher, date);
+    },
+    issueOptions,
+    context
+  );
 }
