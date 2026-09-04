@@ -44,8 +44,8 @@ export type WsfeIdentityMatch =
 
 /**
  * Compares the invoice subset supported by vouchers.issue(). This proves
- * consistency, not authorship; callers must serialize writers per taxpayer,
- * sales point and voucher type. Unsupported exact-API extensions are incomplete.
+ * consistency, not authorship. Configure a store and pass idempotencyKey for retries.
+ * Unsupported exact-API extensions are incomplete.
  */
 export function matchWsfeVoucherIdentity(
   sent: WsfeVoucherInput,

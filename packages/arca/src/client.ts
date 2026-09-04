@@ -66,7 +66,7 @@ export function createArcaClient(config: ArcaClientOptions = {}): ArcaClient {
   return {
     config: publicConfig,
     wsfe,
-    vouchers: createVouchersService(wsfe),
+    vouchers: createVouchersService(wsfe, normalizedConfig),
     wsmtxca: createWsmtxcaService({ config: normalizedConfig, auth, soap }),
     padron: createPadronService({ config: normalizedConfig, auth, soap }),
   };

@@ -9,6 +9,7 @@ import type { IssueAmounts } from "./wsfe-amounts";
 import type { VoucherCoordinates, VoucherSummary } from "./wsfe-identity";
 
 export type IssueOptions = {
+  idempotencyKey?: string;
   representedTaxId?: number | string;
   forceRefresh?: boolean;
   include?: { raw?: boolean; exactInput?: boolean };

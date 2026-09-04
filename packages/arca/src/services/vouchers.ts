@@ -1,15 +1,29 @@
 import {
+  ArcaConfigurationError,
   ArcaInputError,
   ArcaServiceError,
   toArcaSafeErrorMetadata,
 } from "../errors";
+import { normalizeArcaAmountToMinorUnits } from "../internal/decimal";
+import type { ArcaEnvironment } from "../internal/types";
+import {
+  type ArcaAttemptRecord,
+  type ArcaStore,
+  attemptKey,
+  canonicalHash,
+  storeCall,
+} from "../store/types";
 import type { ArcaAuthorizationOutcome } from "./fiscal-evidence";
 import type {
   IssuedVoucher,
   IssueOptions,
   IssueOutcome,
 } from "./vouchers-types";
-import type { WsfeService, WsfeVoucherInput } from "./wsfe";
+import {
+  normalizeWsfeVoucherInput,
+  type WsfeService,
+  type WsfeVoucherInput,
+} from "./wsfe";
 import {
   assertIssueKeys,
   assertIssueObject,
@@ -25,11 +39,7 @@ import {
 
 export type VouchersService = {
   /**
-   * Single-writer contract: serialize calls per (representedTaxId, salesPoint,
-   * voucherType), including concurrent promises in one process. The SDK does not
-   * coordinate writers; uncoordinated calls collide on ARCA 10016. Servers and
-   * queues must persist attempts and use wsfe.authorizeVoucherOutcome() directly.
-   * See the "does not serialize concurrent calls" test in services/vouchers.test.ts.
+   * Configure a store and pass idempotencyKey to recover retries after a crash.
    *
    * One next-number read, one authorization attempt (zero transport retries), and
    * at most one identity-matched lookup after indeterminate. Never resubmits.
@@ -45,10 +55,17 @@ type IssueWsfeService = Pick<
   WsfeService,
   "getNextVoucherNumber" | "authorizeVoucherOutcome" | "lookupVoucher"
 >;
-const SERIALIZATION_NOTICE =
-  "Serialize calls per (representedTaxId, salesPoint, voucherType). The SDK does not coordinate writers; uncoordinated calls collide on 10016. Servers and queues must persist attempts and use wsfe.authorizeVoucherOutcome().";
+type StoreContext = {
+  store?: ArcaStore;
+  environment: ArcaEnvironment;
+  taxId: string;
+};
+type Prepared = ReturnType<typeof deriveWsfeInvoice>;
 
-export function createVouchersService(wsfe: IssueWsfeService): VouchersService {
+export function createVouchersService(
+  wsfe: IssueWsfeService,
+  context?: StoreContext
+): VouchersService {
   return {
     issue: async <O extends IssueOptions = { include?: never }>(
       input: IssueInput,
@@ -57,7 +74,8 @@ export function createVouchersService(wsfe: IssueWsfeService): VouchersService {
       const result = await issueInvoice(
         wsfe,
         input,
-        options === undefined ? {} : options
+        options === undefined ? {} : options,
+        context
       );
       // issueInvoice conditionally adds the fields specified by O at runtime.
       return result as IssueOutcome<O>;
@@ -68,42 +86,205 @@ export function createVouchersService(wsfe: IssueWsfeService): VouchersService {
 async function issueInvoice(
   wsfe: IssueWsfeService,
   input: IssueInput,
-  options: IssueOptions
+  options: IssueOptions,
+  context?: StoreContext
 ): Promise<IssueOutcome<IssueOptions>> {
   validateOptions(options);
-  const { data, voucherClass, amounts } = deriveWsfeInvoice(input);
-  const auth = {
+  validateKeyStore(options, context);
+  const prepared = deriveWsfeInvoice(input);
+  return await runOperation(
+    wsfe,
+    "issue",
+    input,
+    () => Promise.resolve(prepared),
+    options,
+    context,
+    prepared.amounts
+  );
+}
+
+async function runOperation(
+  wsfe: IssueWsfeService,
+  operation: ArcaAttemptRecord["operation"],
+  input: unknown,
+  prepare: () => Promise<Prepared>,
+  options: IssueOptions,
+  context?: StoreContext,
+  replayAmounts?: Prepared["amounts"]
+): Promise<IssueOutcome<IssueOptions>> {
+  const store = context?.store;
+  if (options.idempotencyKey === undefined || !store || !context) {
+    return runAuthorization(wsfe, await prepare(), options);
+  }
+  const key = attemptKey(
+    context.environment,
+    context.taxId,
+    options.idempotencyKey
+  );
+  const representedTaxId =
+    options.representedTaxId === undefined
+      ? undefined
+      : String(options.representedTaxId);
+  const inputHash = canonicalHash({ input, representedTaxId });
+  const existing = await storeCall(() => store.get(key));
+  if (existing !== null) {
+    return replay(existing);
+  }
+  const prepared = await prepare();
+  const number = await nextNumber(wsfe, prepared.data, options);
+  const record: ArcaAttemptRecord = {
+    v: 1,
+    operation,
+    representedTaxId,
+    inputHash,
+    number,
+    salesPoint: prepared.data.salesPoint,
+    voucherType: prepared.data.voucherType,
+    sent: prepared.data,
+    createdAt: new Date().toISOString(),
+  };
+  if (await storeCall(() => store.add(key, JSON.stringify(record)))) {
+    return runAuthorization(wsfe, prepared, options, number);
+  }
+  const winner = await storeCall(() => store.get(key));
+  if (winner === null) {
+    throw new ArcaConfigurationError(
+      "ARCA reservation disappeared after atomic creation lost."
+    );
+  }
+  return replay(winner);
+
+  function replay(json: string) {
+    const stored = readRecord(json);
+    if (
+      stored.operation !== operation ||
+      stored.inputHash !== inputHash ||
+      stored.representedTaxId !== representedTaxId
+    ) {
+      throw new ArcaInputError(
+        "The idempotency key was already used with different input or operation.",
+        {
+          code: "ARCA_INPUT_IDEMPOTENCY_MISMATCH",
+          field: "options.idempotencyKey",
+        }
+      );
+    }
+    return runAuthorization(
+      wsfe,
+      {
+        ...preparedFromRecord(stored),
+        ...(replayAmounts ? { amounts: replayAmounts } : {}),
+      },
+      options,
+      stored.number,
+      true
+    );
+  }
+}
+
+function validateKeyStore(options: IssueOptions, context?: StoreContext) {
+  if (options.idempotencyKey === undefined) {
+    return;
+  }
+  if (
+    typeof options.idempotencyKey !== "string" ||
+    options.idempotencyKey.length < 1 ||
+    options.idempotencyKey.length > 255
+  ) {
+    throw new ArcaInputError(
+      "idempotencyKey must contain 1 to 255 characters.",
+      { code: "ARCA_INPUT_INVALID_VALUE", field: "options.idempotencyKey" }
+    );
+  }
+  if (!context?.store) {
+    throw new ArcaConfigurationError(
+      'idempotencyKey requires a store. Add import { createPostgresStore } from "facturas"; and store: createPostgresStore({ query }) to createArcaClient().'
+    );
+  }
+}
+
+function readRecord(json: string): ArcaAttemptRecord {
+  try {
+    const record = JSON.parse(json) as ArcaAttemptRecord;
+    if (
+      !record ||
+      record.v !== 1 ||
+      !["issue", "cancel"].includes(record.operation) ||
+      typeof record.inputHash !== "string" ||
+      !record.sent ||
+      !Number.isSafeInteger(record.number) ||
+      record.number < 1 ||
+      record.number > 99_999_999 ||
+      record.sent.salesPoint !== record.salesPoint ||
+      record.sent.voucherType !== record.voucherType
+    ) {
+      throw new Error("Invalid reservation structure");
+    }
+    normalizeWsfeVoucherInput(record.sent);
+    return record;
+  } catch (cause) {
+    throw new ArcaConfigurationError(
+      "Invalid ARCA reservation record; preserve it for reconciliation.",
+      { cause }
+    );
+  }
+}
+
+function preparedFromRecord(record: ArcaAttemptRecord): Prepared {
+  const sentTotal = Number(
+    normalizeArcaAmountToMinorUnits(record.sent.totalAmount, "totalAmount")
+  );
+  return {
+    data: record.sent,
+    voucherClass: [1, 3].includes(record.voucherType)
+      ? "A"
+      : [6, 8].includes(record.voucherType)
+        ? "B"
+        : "C",
+    amounts: { computedTotal: sentTotal, sentTotal, vatAdjustment: 0 },
+  };
+}
+
+async function nextNumber(
+  wsfe: IssueWsfeService,
+  data: WsfeVoucherInput,
+  options: IssueOptions
+): Promise<number> {
+  const number = await wsfe.getNextVoucherNumber({
     representedTaxId: options.representedTaxId,
     forceRefresh: options.forceRefresh,
-  };
-  const includeRaw = options.include?.raw === true;
-  const includeExact = options.include?.exactInput === true;
-  const number = await wsfe.getNextVoucherNumber({
-    ...auth,
     salesPoint: data.salesPoint,
     voucherType: data.voucherType,
   });
   if (!Number.isSafeInteger(number) || number < 1 || number > 99_999_999) {
     throw new ArcaServiceError(
       "WSFE returned an invalid next voucher number.",
-      {
-        service: "wsfe",
-        operation: "FECompUltimoAutorizado",
-      }
+      { service: "wsfe", operation: "FECompUltimoAutorizado" }
     );
   }
+  return number;
+}
+
+async function runAuthorization(
+  wsfe: IssueWsfeService,
+  { data, voucherClass, amounts }: Prepared,
+  options: IssueOptions,
+  reservedNumber?: number,
+  replay = false
+): Promise<IssueOutcome<IssueOptions>> {
+  const auth = {
+    representedTaxId: options.representedTaxId,
+    forceRefresh: options.forceRefresh,
+  };
+  const includeRaw = options.include?.raw === true;
+  const includeExact = options.include?.exactInput === true;
+  const number = reservedNumber ?? (await nextNumber(wsfe, data, options));
   const attempted = {
     salesPoint: data.salesPoint,
     voucherType: data.voucherType,
     number,
   };
   const exact = includeExact ? { sent: data } : {};
-  // This is the only authorization call, including all transport/recovery branches.
-  const authorization = await wsfe.authorizeVoucherOutcome({
-    ...auth,
-    data,
-    voucherNumber: number,
-  });
   const voucher = (cae: string, caeExpiry: string): IssuedVoucher => ({
     ...attempted,
     voucherClass,
@@ -111,6 +292,30 @@ async function issueInvoice(
     cae,
     caeExpiry,
     amounts,
+  });
+  const recovery = { wsfe, auth, data, attempted, includeRaw, exact, voucher };
+  if (replay) {
+    const attempt = replayEvidence();
+    let lookup: Awaited<ReturnType<IssueWsfeService["lookupVoucher"]>>;
+    try {
+      lookup = await wsfe.lookupVoucher({ ...auth, ...attempted });
+    } catch (error) {
+      return {
+        kind: "indeterminate",
+        attempted,
+        attempt,
+        lookup: { kind: "failed", error: toArcaSafeErrorMetadata(error) },
+      };
+    }
+    if (lookup.kind === "found") {
+      return recoverInvoice({ ...recovery, attempt, lookup });
+    }
+  }
+  // This is the only authorization call, including all transport/recovery branches.
+  const authorization = await wsfe.authorizeVoucherOutcome({
+    ...auth,
+    data,
+    voucherNumber: number,
   });
   if (
     authorization.kind === "authorized" &&
@@ -126,6 +331,27 @@ async function issueInvoice(
     };
   }
   if (authorization.kind === "rejected") {
+    if (
+      options.idempotencyKey !== undefined &&
+      [...authorization.errors, ...authorization.observations].some(
+        (issue) => issue.code === "10016"
+      )
+    ) {
+      const recovered = await recoverInvoice({
+        ...recovery,
+        attempt: projectEvidence(
+          {
+            ...authorization,
+            kind: "indeterminate",
+            reason: "contradictory_response",
+          },
+          includeRaw
+        ),
+      });
+      if (recovered.kind === "authorized") {
+        return recovered;
+      }
+    }
     return {
       kind: "rejected",
       attempted,
@@ -162,6 +388,7 @@ async function issueInvoice(
 
 type RecoveryInput = {
   wsfe: IssueWsfeService;
+  lookup?: Awaited<ReturnType<IssueWsfeService["lookupVoucher"]>>;
   auth: Pick<IssueOptions, "representedTaxId" | "forceRefresh">;
   data: WsfeVoucherInput;
   attempted: VoucherCoordinates;
@@ -182,10 +409,12 @@ async function recoverInvoice({
   includeRaw,
   exact,
   voucher,
+  lookup: suppliedLookup,
 }: RecoveryInput): Promise<IssueOutcome<IssueOptions>> {
   let lookup: Awaited<ReturnType<IssueWsfeService["lookupVoucher"]>>;
   try {
-    lookup = await wsfe.lookupVoucher({ ...auth, ...attempted });
+    lookup =
+      suppliedLookup ?? (await wsfe.lookupVoucher({ ...auth, ...attempted }));
   } catch (error) {
     return {
       kind: "indeterminate",
@@ -215,7 +444,7 @@ async function recoverInvoice({
         attempted,
         attempt,
         found: { ...toVoucherSummary(lookup.voucher), ...raw },
-        reason: `${matched.reason}. ${SERIALIZATION_NOTICE}`,
+        reason: `${matched.reason}. Configure a store and pass idempotencyKey for retries.`,
       };
     }
     return {
@@ -303,7 +532,7 @@ function validateOptions(options: IssueOptions) {
   assertIssueObject(options, "options");
   assertIssueKeys(
     options,
-    ["representedTaxId", "forceRefresh", "include"],
+    ["representedTaxId", "forceRefresh", "include", "idempotencyKey"],
     "options"
   );
   if (options.representedTaxId !== undefined) {
@@ -341,4 +570,16 @@ function validateOptions(options: IssueOptions) {
       }
     }
   }
+}
+
+function replayEvidence(): RecoveryInput["attempt"] {
+  return {
+    kind: "indeterminate",
+    service: "wsfe",
+    operation: "FECAESolicitar",
+    reason: "incomplete_response",
+    results: {},
+    errors: [],
+    observations: [],
+  };
 }
