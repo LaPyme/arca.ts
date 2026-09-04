@@ -83,7 +83,7 @@ async function issueInvoice(
     salesPoint: data.salesPoint,
     voucherType: data.voucherType,
   });
-  if (!Number.isSafeInteger(number) || number < 1) {
+  if (!Number.isSafeInteger(number) || number < 1 || number > 99_999_999) {
     throw new ArcaServiceError(
       "WSFE returned an invalid next voucher number.",
       {

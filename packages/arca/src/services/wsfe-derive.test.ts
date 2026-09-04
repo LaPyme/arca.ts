@@ -56,13 +56,13 @@ describe("WSFE invoice derivation", () => {
       documentType: 99,
       documentNumber: 0,
     });
-    for (const dni of [12_345_678, "12345678"]) {
+    for (const dni of [12_345_678, "12345678", 123_456_789]) {
       expect(
         deriveWsfeInvoice({
           ...base,
           to: { condition: "consumidor_final", dni },
         }).data
-      ).toMatchObject({ documentType: 96, documentNumber: 12_345_678 });
+      ).toMatchObject({ documentType: 96, documentNumber: Number(dni) });
     }
   });
   it.each([
@@ -88,7 +88,7 @@ describe("WSFE invoice derivation", () => {
     { cuit: "201234567890" },
     { dni: -1 },
     { dni: 1.5 },
-    { dni: 123_456_789 },
+    { dni: 123_456_789_012 },
     { dni: null },
     { cuit: "20123456789", dni: 12_345_678 },
   ])("rejects invalid receiver documents %j", (documents) => {

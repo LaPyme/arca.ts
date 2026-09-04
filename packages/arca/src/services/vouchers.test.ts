@@ -349,6 +349,7 @@ describe("vouchers.issue", () => {
     -1,
     1.5,
     Number.NaN,
+    100_000_000,
   ])("never writes an invalid next number %s", async (number) => {
     const { service, wsfe } = fake();
     wsfe.getNextVoucherNumber.mockResolvedValueOnce(number);

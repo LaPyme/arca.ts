@@ -180,11 +180,12 @@ function deriveReceiver(to: Receiver) {
         ? ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL
         : ARCA_DOCUMENT_TYPES.DNI
       : ARCA_DOCUMENT_TYPES.CUIT;
+  // WSFE DocNro is Long(11); do not impose an undocumented DNI-only width.
   const documentNumber =
     to.cuit === undefined
       ? to.dni === undefined
         ? 0
-        : issueDocumentNumber(to.dni, "to.dni", 1, 8)
+        : issueDocumentNumber(to.dni, "to.dni", 1, 11)
       : issueDocumentNumber(to.cuit, "to.cuit", 11, 11);
   return {
     documentType,

@@ -96,7 +96,7 @@ Class C totals must match exactly. Authorized results expose `computedTotal`,
 The defaults are today's date in Buenos Aires, goods (concept 1), and `ARS` at
 exchange rate `1`. Use `currency: "USD"` with a positive decimal-string
 `exchangeRate`, or `service: { from, to, dueDate }` for concept 2. Dates accept
-`YYYY-MM-DD` or `YYYYMMDD`; service end must follow its start and the payment due
+`YYYY-MM-DD` or `YYYYMMDD`; service end must be on or after its start and the payment due
 date must be on or after the invoice date.
 
 Non-final-consumer receivers require an 11-digit `cuit`. A final consumer accepts
