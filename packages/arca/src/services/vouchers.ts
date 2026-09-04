@@ -48,8 +48,8 @@ export type VouchersService = {
   /**
    * Configure a store and pass idempotencyKey to recover retries after a crash.
    *
-   * One next-number read, one authorization attempt (zero transport retries), and
-   * at most one identity-matched lookup after indeterminate. Never resubmits.
+   * Without a key: one next-number read, one authorization and at most one lookup.
+   * Keyed replay consults the reserved number; only not_found permits a write.
    * Local validation and next-number read failures throw before authorization.
    */
   issue<O extends IssueOptions = { include?: never }>(

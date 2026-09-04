@@ -42,7 +42,7 @@ type Evidence<
   O
 >;
 
-/** Fiscal outcomes are returned, never thrown or automatically resubmitted. */
+/** Fiscal outcomes are returned. Keyed replays authorize only after not_found. */
 export type IssueOutcome<O extends IssueOptions = { include?: never }> =
   | ({
       kind: "authorized";
