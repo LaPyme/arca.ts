@@ -4,3 +4,4 @@ coverage
 .turbo
 *.tgz
 .DS_Store
+plans
