@@ -376,9 +376,10 @@ forced credential refresh after an explicit typed authentication rejection.
 Passing `forceRefresh: true` disables any further authentication recovery
 attempt.
 
-The deprecated WSFE `createNextVoucher(...)` reads the next number and
-authorizes it in one non-idempotent call. It remains for scripts and will be
-removed; applications use `client.issue()` or reserve a number and call
+The deprecated `authorizeVoucher(...)` methods throw instead of returning
+evidence, and the deprecated WSFE `createNextVoucher(...)` reads the next
+number and authorizes it in one non-idempotent call. Both remain for one
+release; applications use `client.issue()` or reserve a number and call
 `wsfe.issue()`.
 
 Exact lookup absence is operation-specific:

@@ -124,6 +124,73 @@ describe("createWsfeService", () => {
     );
   });
 
+  it("deprecated authorizeVoucher still returns the CAE for an explicit number", async () => {
+    const options = createBaseOptions();
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: {
+                Resultado: "A",
+                CAE: "123456789",
+                CAEFchVto: "20260501",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const service = createWsfeService(options);
+    const result = await service.authorizeVoucher({
+      representedTaxId: "20304050607",
+      data: createBaseVoucherInput(),
+      voucherNumber: 26_506,
+    });
+
+    expect(result).toEqual({
+      cae: "123456789",
+      caeExpiry: "20260501",
+      voucherNumber: 26_506,
+      raw: {
+        FeDetResp: {
+          FECAEDetResponse: {
+            Resultado: "A",
+            CAE: "123456789",
+            CAEFchVto: "20260501",
+          },
+        },
+      },
+    });
+    expect(options.auth.login).toHaveBeenCalledOnce();
+    expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
+      representedTaxId: "20304050607",
+    });
+    expect(options.soap.execute).toHaveBeenCalledOnce();
+    expect(options.soap.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        service: "wsfe",
+        operation: "FECAESolicitar",
+        body: expect.objectContaining({
+          FeCAEReq: expect.objectContaining({
+            FeCabReq: {
+              CantReg: 1,
+              PtoVta: 1,
+              CbteTipo: 6,
+            },
+            FeDetReq: {
+              FECAEDetRequest: expect.objectContaining({
+                CbteDesde: 26_506,
+                CbteHasta: 26_506,
+              }),
+            },
+          }),
+        }),
+      })
+    );
+  });
+
   it("returns authorized evidence with every WSFE observation", async () => {
     const options = createBaseOptions();
     options.soap.execute.mockResolvedValueOnce({

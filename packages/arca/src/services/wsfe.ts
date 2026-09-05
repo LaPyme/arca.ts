@@ -222,6 +222,14 @@ export type WsfeService = {
     input: WsfeAuthorizeVoucherInput
   ): Promise<WsfeAuthorizationOutcome>;
   /**
+   * @deprecated Throws instead of returning evidence, which loses the
+   * rejected/indeterminate distinction. Use `issue()`. Removed in the next
+   * minor release.
+   */
+  authorizeVoucher(
+    input: WsfeAuthorizeVoucherInput
+  ): Promise<WsfeAuthorizationResult>;
+  /**
    * @deprecated Reads the next number and authorizes in one non-idempotent
    * call. Use `client.issue()` or reserve a number and call `wsfe.issue()`.
    */
@@ -507,6 +515,21 @@ export function createWsfeService(
     return getWsfeResultEntries(result, resultKey).map(mapWsfeCatalogEntry);
   }
 
+  function authorizeVoucher({
+    representedTaxId,
+    data,
+    voucherNumber,
+    forceRefresh,
+  }: WsfeAuthorizeVoucherInput): Promise<WsfeAuthorizationResult> {
+    const normalizedInput = normalizeWsfeVoucherInput(data);
+    return authorizeNormalizedVoucher({
+      representedTaxId,
+      data: normalizedInput,
+      voucherNumber,
+      forceRefresh,
+    });
+  }
+
   function issue({
     representedTaxId,
     data,
@@ -737,6 +760,7 @@ export function createWsfeService(
   return {
     issue,
     authorizeVoucherOutcome: issue,
+    authorizeVoucher,
     async createNextVoucher({ representedTaxId, data, forceRefresh }) {
       const normalizedInput = normalizeWsfeVoucherInput(data);
 
