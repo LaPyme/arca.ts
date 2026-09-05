@@ -84,13 +84,11 @@ function fake() {
   const store = createMemoryStore();
   const wsfe = {
     getNextVoucherNumber: vi.fn().mockResolvedValue(77),
-    authorizeVoucherOutcome: vi.fn(
-      async ({ data }: WsfeAuthorizeVoucherInput) => {
-        normalizeWsfeVoucherInput(data);
-        expect(await store.get(key)).not.toBeNull();
-        return authorized;
-      }
-    ),
+    issue: vi.fn(async ({ data }: WsfeAuthorizeVoucherInput) => {
+      normalizeWsfeVoucherInput(data);
+      expect(await store.get(key)).not.toBeNull();
+      return authorized;
+    }),
     lookupVoucher: vi.fn().mockResolvedValue(found()),
   };
   const service = createVouchersService(wsfe, {
@@ -123,7 +121,7 @@ describe("keyed issue", () => {
     }
     expect(wsfe.getNextVoucherNumber).not.toHaveBeenCalled();
     expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
   });
   it("reserves before writing and replays with one matching lookup", async () => {
     const { store, wsfe, service } = fake();
@@ -144,7 +142,7 @@ describe("keyed issue", () => {
     });
     noPrivate(result);
     expect(wsfe.getNextVoucherNumber).toHaveBeenCalledTimes(1);
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledTimes(1);
+    expect(wsfe.issue).toHaveBeenCalledTimes(1);
     expect(wsfe.lookupVoucher).toHaveBeenCalledTimes(1);
     expect(await store.get(key)).toBe(json);
   });
@@ -175,7 +173,7 @@ describe("keyed issue", () => {
       mode === "mismatch" ? "conflict" : "indeterminate"
     );
     noPrivate(result);
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledTimes(1);
+    expect(wsfe.issue).toHaveBeenCalledTimes(1);
   });
   it("retries the stored number and date after not_found across midnight", async () => {
     vi.useFakeTimers();
@@ -183,13 +181,13 @@ describe("keyed issue", () => {
     const { wsfe, service } = fake();
     const value = { ...input, date: undefined };
     await service.issue(value, { idempotencyKey: "sale" });
-    const first = wsfe.authorizeVoucherOutcome.mock.calls[0][0];
+    const first = wsfe.issue.mock.calls[0][0];
     vi.setSystemTime(new Date("2026-09-05T22:00:00Z"));
     wsfe.lookupVoucher.mockResolvedValue(absent);
     expect((await service.issue(value, { idempotencyKey: "sale" })).kind).toBe(
       "authorized"
     );
-    expect(wsfe.authorizeVoucherOutcome.mock.calls[1][0]).toEqual(first);
+    expect(wsfe.issue.mock.calls[1][0]).toEqual(first);
     expect(wsfe.getNextVoucherNumber).toHaveBeenCalledTimes(1);
   });
   it("mismatched input or represented taxpayer causes zero provider calls", async () => {
@@ -210,7 +208,7 @@ describe("keyed issue", () => {
     ).rejects.toMatchObject({ code: "ARCA_INPUT_IDEMPOTENCY_MISMATCH" });
     expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
     expect(wsfe.getNextVoucherNumber).not.toHaveBeenCalled();
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
   });
   it("losing add reads the winner and never reads another number", async () => {
     const { store, wsfe, service } = fake();
@@ -221,18 +219,29 @@ describe("keyed issue", () => {
       "authorized"
     );
     expect(wsfe.getNextVoucherNumber).toHaveBeenCalledTimes(2);
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledTimes(1);
+    expect(wsfe.issue).toHaveBeenCalledTimes(1);
     expect(await store.get(key)).toBe(json);
   });
   it.each([true, false])("checks 10016 once; matching=%s", async (match) => {
     const { wsfe, service } = fake();
-    wsfe.authorizeVoucherOutcome.mockResolvedValue(rejected);
+    wsfe.issue.mockResolvedValue(rejected);
     wsfe.lookupVoucher.mockResolvedValue(match ? found() : absent);
     expect((await service.issue(input, { idempotencyKey: "sale" })).kind).toBe(
       match ? "authorized" : "rejected"
     );
     expect(wsfe.lookupVoucher).toHaveBeenCalledTimes(1);
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledTimes(1);
+    expect(wsfe.issue).toHaveBeenCalledTimes(1);
+  });
+  it("reports a conflict when keyed 10016 hides a different voucher", async () => {
+    const { wsfe, service } = fake();
+    wsfe.issue.mockResolvedValue(rejected);
+    wsfe.lookupVoucher.mockResolvedValue(
+      found({ ...deriveWsfeInvoice(input).data, totalAmount: 999 })
+    );
+    const outcome = await service.issue(input, { idempotencyKey: "sale" });
+    expect(outcome.kind).toBe("conflict");
+    expect(wsfe.lookupVoucher).toHaveBeenCalledTimes(1);
+    expect(wsfe.issue).toHaveBeenCalledTimes(1);
   });
   it("recovers a concurrent authorization rejected with 10016", async () => {
     const { store, wsfe, service } = fake();
@@ -241,7 +250,7 @@ describe("keyed issue", () => {
     const waiting = new Promise<void>((resolve) => {
       release = resolve;
     });
-    wsfe.authorizeVoucherOutcome.mockImplementation(async () => {
+    wsfe.issue.mockImplementation(async () => {
       writes++;
       if (writes === 1) {
         await waiting;
@@ -259,7 +268,7 @@ describe("keyed issue", () => {
       "authorized",
       "authorized",
     ]);
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledTimes(2);
+    expect(wsfe.issue).toHaveBeenCalledTimes(2);
     expect(wsfe.lookupVoucher).toHaveBeenCalledTimes(2);
     expect(JSON.parse((await store.get(key)) ?? "null").number).toBe(77);
   });
@@ -292,7 +301,7 @@ describe("keyed issue", () => {
     await expect(
       service.issue(input, { idempotencyKey: "sale" })
     ).rejects.toThrow(ArcaConfigurationError);
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
   });
   it("replay uses stored input even if the reserved date differs", async () => {
     const { store, wsfe, service } = fake();
@@ -304,8 +313,6 @@ describe("keyed issue", () => {
     await store.set(key, JSON.stringify(record));
     wsfe.lookupVoucher.mockResolvedValue(absent);
     await service.issue(input, { idempotencyKey: "sale" });
-    expect(wsfe.authorizeVoucherOutcome.mock.calls[1][0].data.voucherDate).toBe(
-      "20260903"
-    );
+    expect(wsfe.issue.mock.calls[1][0].data.voucherDate).toBe("20260903");
   });
 });

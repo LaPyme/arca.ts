@@ -316,6 +316,16 @@ export type ResolvedArcaClientConfig = ArcaClientConfig & {
 export function discoverArcaClientConfig(
   config: ArcaClientOptions
 ): ArcaClientConfig {
+  const environment =
+    config.environment ??
+    (readEnv(process.env, ARCA_ENV_VARIABLES.environment) as
+      | ArcaEnvironment
+      | undefined);
+  if (environment === undefined) {
+    throw new ArcaConfigurationError(
+      `environment is required: pass environment or set ${ARCA_ENV_VARIABLES.environment} to "test" or "production".`
+    );
+  }
   return {
     ...config,
     taxId: config.taxId ?? readEnv(process.env, ARCA_ENV_VARIABLES.taxId) ?? "",
@@ -327,12 +337,7 @@ export function discoverArcaClientConfig(
       config.privateKeyPem ??
       readEnv(process.env, ARCA_ENV_VARIABLES.privateKeyPem) ??
       "",
-    environment:
-      config.environment ??
-      (readEnv(process.env, ARCA_ENV_VARIABLES.environment) as
-        | ArcaEnvironment
-        | undefined) ??
-      "test",
+    environment,
   };
 }
 

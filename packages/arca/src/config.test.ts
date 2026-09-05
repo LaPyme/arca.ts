@@ -1,14 +1,42 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ARCA_ENV_VARIABLES,
   ARCA_ENVIRONMENTS,
   ARCA_WSAA_CONFIG,
   assertArcaClientConfig,
   createArcaClientConfigFromEnv,
+  discoverArcaClientConfig,
   getArcaServiceConfig,
   resolveArcaEnvironment,
 } from "./config";
 import { ArcaConfigurationError } from "./errors";
+
+describe("discoverArcaClientConfig", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("fills missing fields from the environment without a default environment", () => {
+    vi.stubEnv("ARCA_TAX_ID", "20123456789");
+    vi.stubEnv("ARCA_CERTIFICATE_PEM", "cert");
+    vi.stubEnv("ARCA_PRIVATE_KEY_PEM", "key");
+    vi.stubEnv("ARCA_ENVIRONMENT", "production");
+
+    expect(discoverArcaClientConfig({ taxId: "20999999999" })).toEqual({
+      taxId: "20999999999",
+      certificatePem: "cert",
+      privateKeyPem: "key",
+      environment: "production",
+    });
+  });
+
+  it("throws when neither the config nor ARCA_ENVIRONMENT names an environment", () => {
+    vi.stubEnv("ARCA_ENVIRONMENT", "");
+
+    expect(() => discoverArcaClientConfig({ taxId: "20123456789" })).toThrow(
+      ArcaConfigurationError
+    );
+    expect(() => discoverArcaClientConfig({})).toThrow(/ARCA_ENVIRONMENT/);
+  });
+});
 
 describe("config", () => {
   it("resolves the target environment", () => {

@@ -20,7 +20,7 @@ const NOTES: Record<
 };
 function invalid(reason: string): never {
   throw new ArcaInputError(
-    `Cannot cancel: ${reason}. Use wsfe.authorizeVoucherOutcome() for exact control.`,
+    `Cannot cancel: ${reason}. Use wsfe.issue() for exact control.`,
     { code: "ARCA_INPUT_INVALID_VALUE" }
   );
 }

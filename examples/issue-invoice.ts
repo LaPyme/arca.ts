@@ -3,7 +3,7 @@ import { createArcaClient, createMemoryStore } from "facturas";
 // Example only: use a durable store in an app. Memory does not survive restarts.
 const arca = createArcaClient({ store: createMemoryStore() });
 const venta = { id: "sale-example-001" };
-const factura = await arca.vouchers.issue(
+const factura = await arca.issue(
   {
     issuer: "monotributo",
     salesPoint: 3,

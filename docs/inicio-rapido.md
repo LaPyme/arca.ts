@@ -21,7 +21,8 @@ instalá también el cliente `@vercel/postgres` de tu aplicación.
 
 Definí `ARCA_TAX_ID`, `ARCA_CERTIFICATE_PEM`, `ARCA_PRIVATE_KEY_PEM` y
 `ARCA_ENVIRONMENT=test`. Los PEM deben contener el certificado y la clave
-completos. No los subas al repositorio. El entorno predeterminado es `test`.
+completos. No los subas al repositorio. No hay entorno predeterminado: `test`
+apunta a homologación y `production` a los servidores reales.
 Los campos explícitos de `createArcaClient()` tienen prioridad.
 
 Creá una vez la tabla [Postgres del README](../README.md#postgres) y usá:
@@ -45,7 +46,7 @@ sobrevive al reinicio del proceso.
 emisor y tu punto de venta habilitado:
 
 ```ts
-const factura = await arca.vouchers.issue(
+const factura = await arca.issue(
   {
     issuer: "monotributo",
     salesPoint: 3,
@@ -88,7 +89,7 @@ Para anularla por su importe completo:
 
 ```ts
 if (factura.kind === "authorized") {
-  const nota = await arca.vouchers.cancel(factura.voucher, {
+  const nota = await arca.cancel(factura.voucher, {
     idempotencyKey: `cancel:${venta.id}`,
   });
   console.log(nota); // También debe tratarse cada resultado de la nota.

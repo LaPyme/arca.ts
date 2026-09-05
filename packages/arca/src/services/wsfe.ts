@@ -212,17 +212,19 @@ export type WsfeQuotation = {
 /** WSFE electronic invoicing service. */
 export type WsfeService = {
   /**
-   * Attempts one exact authorization without transport retries and returns
-   * structured provider evidence instead of flattening the result to throw/success.
+   * Issues one exact voucher: a single FECAESolicitar for the caller-owned
+   * `voucherNumber`, without transport retries, returning structured evidence
+   * (`authorized`, `rejected` or `indeterminate`) instead of throwing.
    */
+  issue(input: WsfeAuthorizeVoucherInput): Promise<WsfeAuthorizationOutcome>;
+  /** @deprecated Renamed to `issue()`. Removed in the next minor release. */
   authorizeVoucherOutcome(
     input: WsfeAuthorizeVoucherInput
   ): Promise<WsfeAuthorizationOutcome>;
-  /** Authorizes a voucher with the explicit number sent as `CbteDesde` and `CbteHasta`. */
-  authorizeVoucher(
-    input: WsfeAuthorizeVoucherInput
-  ): Promise<WsfeAuthorizationResult>;
-  /** Authorizes a new voucher by fetching the next number and requesting a CAE. */
+  /**
+   * @deprecated Reads the next number and authorizes in one non-idempotent
+   * call. Use `client.issue()` or reserve a number and call `wsfe.issue()`.
+   */
   createNextVoucher(input: {
     representedTaxId?: number | string;
     data: WsfeVoucherInput;
@@ -505,22 +507,7 @@ export function createWsfeService(
     return getWsfeResultEntries(result, resultKey).map(mapWsfeCatalogEntry);
   }
 
-  function authorizeVoucher({
-    representedTaxId,
-    data,
-    voucherNumber,
-    forceRefresh,
-  }: WsfeAuthorizeVoucherInput): Promise<WsfeAuthorizationResult> {
-    const normalizedInput = normalizeWsfeVoucherInput(data);
-    return authorizeNormalizedVoucher({
-      representedTaxId,
-      data: normalizedInput,
-      voucherNumber,
-      forceRefresh,
-    });
-  }
-
-  function authorizeVoucherOutcome({
+  function issue({
     representedTaxId,
     data,
     voucherNumber,
@@ -748,8 +735,8 @@ export function createWsfeService(
   }
 
   return {
-    authorizeVoucherOutcome,
-    authorizeVoucher,
+    issue,
+    authorizeVoucherOutcome: issue,
     async createNextVoucher({ representedTaxId, data, forceRefresh }) {
       const normalizedInput = normalizeWsfeVoucherInput(data);
 

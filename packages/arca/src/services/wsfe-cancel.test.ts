@@ -113,7 +113,7 @@ describe("full cancellation derivation", () => {
         { ...invoice, [field]: [{ value: 1 }] },
         "20260905"
       )
-    ).toThrow("wsfe.authorizeVoucherOutcome()");
+    ).toThrow("wsfe.issue()");
   });
   it("rejects missing required evidence and unsupported originals", () => {
     for (const change of [

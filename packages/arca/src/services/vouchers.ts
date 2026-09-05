@@ -60,7 +60,7 @@ export type VouchersService = {
 
 type IssueWsfeService = Pick<
   WsfeService,
-  "getNextVoucherNumber" | "authorizeVoucherOutcome" | "lookupVoucher"
+  "getNextVoucherNumber" | "issue" | "lookupVoucher"
 >;
 type StoreContext = {
   store?: ArcaStore;
@@ -328,7 +328,7 @@ async function runAuthorization(
     }
   }
   // This is the only authorization call, including all transport/recovery branches.
-  const authorization = await wsfe.authorizeVoucherOutcome({
+  const authorization = await wsfe.issue({
     ...auth,
     data,
     voucherNumber: number,
@@ -364,7 +364,9 @@ async function runAuthorization(
           includeRaw
         ),
       });
-      if (recovered.kind === "authorized") {
+      // A stranger at the reserved number is a conflict; a failed or empty
+      // lookup keeps the provider rejection as the answer.
+      if (recovered.kind === "authorized" || recovered.kind === "conflict") {
         return recovered;
       }
     }
@@ -629,7 +631,7 @@ async function cancelInvoice(
   }
   if (![1, 6, 11].includes(target.voucherType)) {
     throw new ArcaInputError(
-      "cancel requires an invoice of type 1, 6 or 11; use wsfe.authorizeVoucherOutcome() for exact control.",
+      "cancel requires an invoice of type 1, 6 or 11; use wsfe.issue() for exact control.",
       { code: "ARCA_INPUT_INVALID_VALUE" }
     );
   }

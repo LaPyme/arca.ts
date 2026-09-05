@@ -8,7 +8,6 @@ import {
 import {
   classifyArcaAuthenticationError,
   classifyArcaAuthenticationIssues,
-  createArcaAuthenticationErrorFromEvidence,
   createArcaAuthenticationEvidence,
   executeWithAuthenticationRecovery,
 } from "../internal/authentication";
@@ -30,6 +29,7 @@ export type WsmtxcaAuthorizeVoucherInput = {
 };
 
 /** Result of a successful WSMTXCA voucher authorization. */
+/** @deprecated Only the removed throwing method returned this shape. */
 export type WsmtxcaAuthorizationResult = {
   cae: string;
   caeExpiry?: string;
@@ -100,14 +100,17 @@ export type WsmtxcaVoucherLookupResult = {
 
 /** WSMTXCA electronic invoicing service (Factura de Crédito Electrónica). */
 export type WsmtxcaService = {
-  /** Attempts one authorization without transport retries and returns provider evidence. */
+  /**
+   * Issues one exact voucher: a single autorizarComprobante without transport
+   * retries, returning structured evidence instead of throwing.
+   */
+  issue(
+    input: WsmtxcaAuthorizeVoucherInput
+  ): Promise<WsmtxcaAuthorizationOutcome>;
+  /** @deprecated Renamed to `issue()`. Removed in the next minor release. */
   authorizeVoucherOutcome(
     input: WsmtxcaAuthorizeVoucherInput
   ): Promise<WsmtxcaAuthorizationOutcome>;
-  /** Authorizes a voucher and returns the CAE. */
-  authorizeVoucher(
-    input: WsmtxcaAuthorizeVoucherInput
-  ): Promise<WsmtxcaAuthorizationResult>;
   /** Returns the last authorized voucher number for the given sales point and type. */
   getLastAuthorizedVoucher(input: {
     representedTaxId?: ArcaRepresentedTaxId;
@@ -219,48 +222,10 @@ export function createWsmtxcaService(
     }
   }
 
-  async function authorizeVoucherOutcome(
+  async function issue(
     input: WsmtxcaAuthorizeVoucherInput
   ): Promise<WsmtxcaAuthorizationOutcome> {
     return (await executeWsmtxcaAuthorization(input)).outcome;
-  }
-
-  function authorizeVoucher(
-    input: WsmtxcaAuthorizeVoucherInput
-  ): Promise<WsmtxcaAuthorizationResult> {
-    return executeWithAuthenticationRecovery({
-      service: "wsmtxca",
-      operation: "autorizarComprobante",
-      forceRefresh: input.forceRefresh,
-      execute: (forceRefresh) =>
-        authorizeVoucherOnce({ ...input, forceRefresh }),
-    });
-  }
-
-  async function authorizeVoucherOnce(
-    input: WsmtxcaAuthorizeVoucherInput
-  ): Promise<WsmtxcaAuthorizationResult> {
-    const execution = await executeWsmtxcaAuthorization(input);
-    if (execution.error) {
-      throw execution.error;
-    }
-    if (execution.outcome.kind !== "authorized") {
-      throw createWsmtxcaOutcomeError(execution.outcome);
-    }
-
-    const { outcome } = execution;
-    return {
-      cae: outcome.cae,
-      ...(outcome.caeExpiry === undefined
-        ? {}
-        : { caeExpiry: outcome.caeExpiry }),
-      voucherNumber: outcome.voucherNumber,
-      messages: formatWsmtxcaIssues([
-        ...outcome.errors,
-        ...outcome.observations,
-      ]),
-      raw: outcome.raw ?? {},
-    };
   }
 
   function getLastAuthorizedVoucher({
@@ -512,8 +477,8 @@ export function createWsmtxcaService(
   }
 
   return {
-    authorizeVoucherOutcome,
-    authorizeVoucher,
+    issue,
+    authorizeVoucherOutcome: issue,
     getLastAuthorizedVoucher,
     getSalesPoints,
     lookupVoucher,
@@ -765,43 +730,6 @@ function getWsmtxcaIndeterminateReason(
     return "invalid_response";
   }
   return "unexpected_error";
-}
-
-function createWsmtxcaOutcomeError(
-  outcome: Exclude<WsmtxcaAuthorizationOutcome, { kind: "authorized" }>
-) {
-  if (outcome.kind === "indeterminate" && outcome.authentication) {
-    return createArcaAuthenticationErrorFromEvidence(outcome.authentication, {
-      service: "wsmtxca",
-      operation: outcome.operation,
-    });
-  }
-
-  const issues = [...outcome.errors, ...outcome.observations];
-  const messages = formatWsmtxcaIssues(issues);
-  const firstIssue = issues[0];
-  return new ArcaServiceError(
-    messages.join(" | ") ||
-      (outcome.kind === "rejected"
-        ? "WSMTXCA rejected the voucher authorization"
-        : "WSMTXCA did not return conclusive voucher authorization data"),
-    {
-      service: "wsmtxca",
-      operation: outcome.operation,
-      ...(firstIssue?.code === undefined
-        ? {}
-        : { serviceCode: firstIssue.code }),
-      ...(outcome.result === undefined ? {} : { result: outcome.result }),
-      ...(outcome.resultLevel === undefined
-        ? {}
-        : { resultLevel: outcome.resultLevel }),
-      results: outcome.results,
-      ...(outcome.kind === "indeterminate" && outcome.cae
-        ? { cae: outcome.cae }
-        : {}),
-      issues,
-    }
-  );
 }
 
 function createWsmtxcaResults(operationResult?: string) {

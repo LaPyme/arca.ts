@@ -43,7 +43,7 @@ export type WsfeIdentityMatch =
   | { matches: false; evidence: "conflict" | "incomplete"; reason: string };
 
 /**
- * Compares the invoice subset supported by vouchers.issue(). This proves
+ * Compares the invoice subset supported by issue(). This proves
  * consistency, not authorship. Configure a store and pass idempotencyKey for retries.
  * Unsupported exact-API extensions are incomplete.
  */

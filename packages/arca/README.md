@@ -36,7 +36,7 @@ const arca = createArcaClient({
   store: createPostgresStore({ query: (text, params) => sql.query(text, params) }),
 });
 
-const factura = await arca.vouchers.issue(
+const factura = await arca.issue(
   {
     issuer: "monotributo",
     salesPoint: 3,
@@ -68,14 +68,14 @@ leaves the invoice outstanding. Match `issuer` to your actual tax condition.
 
 ```ts
 const arca = createArcaClient({ environment: "production" });
-const factura = await arca.vouchers.issue({
+const factura = await arca.issue({
   issuer: "monotributo",
   salesPoint: 3,
   to: { condition: "consumidor_final" },
   items: [{ amount: 100 }], // ARS 1.00
 });
 if (factura.kind === "authorized") {
-  const nota = await arca.vouchers.cancel(factura.voucher);
+  const nota = await arca.cancel(factura.voucher);
   console.log(nota); // Handle every outcome, including a failed credit note.
 }
 ```
@@ -277,12 +277,16 @@ const data = buildFacturaB({
   // currency is omitted, so the builder defaults to ISO ARS.
 });
 
-// Exact convenience: the caller coordinates numbering and recovery.
-const issued = await client.wsfe.createNextVoucher({
-  data,
+// Exact layer: reserve the number yourself, then issue it exactly once.
+const voucherNumber = await client.wsfe.getNextVoucherNumber({
+  salesPoint: data.salesPoint,
+  voucherType: data.voucherType,
 });
+const issued = await client.wsfe.issue({ voucherNumber, data });
 
-console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
+if (issued.kind === "authorized") {
+  console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
+}
 ```
 
 `buildFacturaB()` derives the Factura B type, net amount, IVA detail, IVA
@@ -328,18 +332,21 @@ const usdData = buildFacturaB({
 
 ### WSMTXCA
 
-WSMTXCA remains supported and exported, but this package currently puts most editorial focus on WSFE and Padrón. If you need `authorizeVoucher`, `authorizeVoucherOutcome`, `getLastAuthorizedVoucher`, `lookupVoucher`, `getVoucher`, or `getSalesPoints`, the runtime API is available and covered by tests.
+WSMTXCA remains supported and exported, but this package currently puts most editorial focus on WSFE and Padrón. If you need `issue`, `getLastAuthorizedVoucher`, `lookupVoucher`, `getVoucher`, or `getSalesPoints`, the runtime API is available and covered by tests.
 
-## Exact authorization and recovery evidence
+## Exact issuance and recovery evidence
 
-Use `authorizeVoucherOutcome(...)` with a caller-owned, durably reserved voucher
-number when your application must decide whether one exact fiscal attempt was
-authorized, rejected, or left indeterminate. It preserves every structured
-error and observation with its service, operation, code, source, and result
-level.
+`client.issue()` derives the WSFE request, reserves the number and recovers
+after a crash for you. When you need something it does not derive (tributes,
+partial notes, FCE, an associated period) or your application owns the
+numbering, use the exact layer: `client.wsfe.issue(...)` sends one
+FECAESolicitar for a caller-owned, durably reserved voucher number and tells
+you whether that exact attempt was authorized, rejected, or left
+indeterminate. It preserves every structured error and observation with its
+service, operation, code, source, and result level.
 
 ```ts
-const outcome = await client.wsfe.authorizeVoucherOutcome({
+const outcome = await client.wsfe.issue({
   voucherNumber: reservedVoucherNumber,
   data,
 });
@@ -362,15 +369,17 @@ if (outcome.kind === "authorized") {
 }
 ```
 
-Authorization outcome methods force one SOAP transport attempt, even when the client has general transport retries configured. They never refresh credentials and resubmit automatically. An explicit provider authentication rejection is returned as `reason: "authentication_rejected"` with safe typed `authentication` evidence; a timeout, connection failure, invalid response, or incomplete/contradictory result remains indeterminate without resubmission. This prevents uncertain fiscal work from causing a hidden second authorization.
+`wsfe.issue()` and `wsmtxca.issue()` force one SOAP transport attempt, even when the client has general transport retries configured. They never refresh credentials and resubmit automatically. An explicit provider authentication rejection is returned as `reason: "authentication_rejected"` with safe typed `authentication` evidence; a timeout, connection failure, invalid response, or incomplete/contradictory result remains indeterminate without resubmission. This prevents uncertain fiscal work from causing a hidden second authorization.
 
-The convenience `authorizeVoucher(...)` methods keep their success-or-throw
-contract and may repeat the exact same payload once after an explicit typed
-authentication rejection. WSFE `createNextVoucher(...)` applies the same rule
-to the number it already fetched; it never fetches another number for the retry.
-Authenticated read, catalog, and lookup convenience operations also perform at
-most one forced-refresh retry. Passing `forceRefresh: true` disables any further
-authentication recovery attempt.
+Authenticated read, catalog, and lookup operations may repeat once with a
+forced credential refresh after an explicit typed authentication rejection.
+Passing `forceRefresh: true` disables any further authentication recovery
+attempt.
+
+The deprecated WSFE `createNextVoucher(...)` reads the next number and
+authorizes it in one non-idempotent call. It remains for scripts and will be
+removed; applications use `client.issue()` or reserve a number and call
+`wsfe.issue()`.
 
 Exact lookup absence is operation-specific:
 
@@ -543,7 +552,7 @@ identifiers, not ISO codes.
 | `ARCA_TAX_ID` | Yes | 11-digit CUIT |
 | `ARCA_CERTIFICATE_PEM` | Yes | PEM certificate |
 | `ARCA_PRIVATE_KEY_PEM` | Yes | PEM private key |
-| `ARCA_ENVIRONMENT` | No | `test` or `production`; defaults to `test` |
+| `ARCA_ENVIRONMENT` | Yes | `test` or `production`; there is no default |
 
 For logging without code changes, set `ARCA_LOG_LEVEL` to `debug`, `info`, `warn`, or `error`.
 
@@ -675,9 +684,9 @@ Configured transport retries apply only to `ArcaTransportError`: timeouts, conne
 Separately, authenticated WSFE and WSMTXCA convenience operations may perform
 one forced-refresh retry only after `ArcaAuthenticationError`. Timeouts,
 connection loss, invalid SOAP, incomplete evidence, contradictory evidence, and
-generic service rejections never unlock this recovery path. Both
-`authorizeVoucherOutcome(...)` methods always perform one exact authorization
-attempt, and each authorization SOAP attempt has transport retries set to zero.
+generic service rejections never unlock this recovery path. `wsfe.issue()` and
+`wsmtxca.issue()` always perform one exact authorization attempt, and each
+authorization SOAP attempt has transport retries set to zero.
 
 ## Service Surface
 
@@ -686,7 +695,8 @@ attempt, and each authorization SOAP attempt has transport retries set to zero.
 WSFE electronic invoicing. Inputs use JS-style names and the SDK maps them to AFIP / ARCA SOAP fields internally.
 
 - Date fields accept `YYYY-MM-DD` or `YYYYMMDD`.
-- `createNextVoucher({ data })` resolves the next number and requests CAE in one call.
+- `issue({ voucherNumber, data })` sends one exact authorization and returns `authorized`, `rejected` or `indeterminate` evidence.
+- `getNextVoucherNumber({ salesPoint, voucherType })` reads the next number to reserve.
 - `getVoucherInfo({ number, salesPoint, voucherType })` returns voucher details or `null`.
 - Catalog methods are available for live reference data when you do not want to hardcode values.
 - Authenticated methods accept `forceRefresh: true` to discard the cached WSAA TA and request a fresh Token Authorization for the same service.
@@ -700,7 +710,7 @@ Padron "not found" handling currently depends on SOAP fault message text from AR
 
 ### `client.wsmtxca`
 
-- `authorizeVoucher({ data })`
+- `issue({ data })`
 - `getLastAuthorizedVoucher({ voucherType, salesPoint })`
 - `getVoucher({ voucherType, salesPoint, voucherNumber })`
 - Authenticated methods accept `forceRefresh: true` to renew the WSMTXCA WSAA TA before the call.
@@ -729,7 +739,7 @@ import {
 } from "facturas";
 
 try {
-  await client.wsfe.createNextVoucher({ data: /* ... */ });
+  await client.wsfe.getNextVoucherNumber({ salesPoint: 1, voucherType: 6 });
 } catch (error) {
   if (error instanceof ArcaAuthenticationError) {
     console.error(

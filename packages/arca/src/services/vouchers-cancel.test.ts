@@ -76,14 +76,12 @@ function fake() {
       calls.push("next");
       return Promise.resolve(9);
     }),
-    authorizeVoucherOutcome: vi.fn(
-      ({ data: sent }: WsfeAuthorizeVoucherInput) => {
-        normalizeWsfeVoucherInput(sent);
-        note = sent;
-        calls.push("authorize");
-        return Promise.resolve(authorized);
-      }
-    ),
+    issue: vi.fn(({ data: sent }: WsfeAuthorizeVoucherInput) => {
+      normalizeWsfeVoucherInput(sent);
+      note = sent;
+      calls.push("authorize");
+      return Promise.resolve(authorized);
+    }),
     lookupVoucher: vi.fn(({ voucherType }: { voucherType: number }) => {
       calls.push("lookup");
       return Promise.resolve(
@@ -142,7 +140,7 @@ describe("cancel orchestration", () => {
       "original voucher not found"
     );
     expect(wsfe.getNextVoucherNumber).not.toHaveBeenCalled();
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
   });
   it("validates locally and requires a store before original lookup", async () => {
     const { service, wsfe } = fake();
@@ -185,7 +183,7 @@ describe("cancel orchestration", () => {
       )
     ).rejects.toMatchObject({ code: "ARCA_INPUT_IDEMPOTENCY_MISMATCH" });
     expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
   });
   it.each([
     "incomplete",
@@ -195,7 +193,7 @@ describe("cancel orchestration", () => {
   ])("replay %s preserves the I/O bound", async (mode) => {
     const { service, wsfe } = fake();
     await service.cancel(target, options);
-    const sent = wsfe.authorizeVoucherOutcome.mock.calls[0][0].data;
+    const sent = wsfe.issue.mock.calls[0][0].data;
     const lookup = found(sent, 9);
     if (lookup.kind !== "found") {
       throw new Error("fixture");
@@ -224,13 +222,11 @@ describe("cancel orchestration", () => {
           : "indeterminate"
     );
     expect(wsfe.getNextVoucherNumber).toHaveBeenCalledTimes(1);
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledTimes(
-      mode === "not_found" ? 2 : 1
-    );
+    expect(wsfe.issue).toHaveBeenCalledTimes(mode === "not_found" ? 2 : 1);
   });
   it("recovers indeterminate writes by matching associations", async () => {
     const { service, wsfe } = fake();
-    wsfe.authorizeVoucherOutcome.mockImplementation(({ data: sent }) => {
+    wsfe.issue.mockImplementation(({ data: sent }) => {
       wsfe.lookupVoucher.mockResolvedValue(found(sent, 9));
       return Promise.resolve({
         ...base,
@@ -263,7 +259,7 @@ it("cancel recovers concurrent keyed writes through 10016", async () => {
           : found(note, 9)
     )
   );
-  wsfe.authorizeVoucherOutcome.mockImplementation(async ({ data: sent }) => {
+  wsfe.issue.mockImplementation(async ({ data: sent }) => {
     note = sent;
     writes++;
     if (writes === 1) {
@@ -296,5 +292,5 @@ it("cancel recovers concurrent keyed writes through 10016", async () => {
     "authorized",
     "authorized",
   ]);
-  expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledTimes(2);
+  expect(wsfe.issue).toHaveBeenCalledTimes(2);
 });

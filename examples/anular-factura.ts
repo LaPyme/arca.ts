@@ -5,7 +5,7 @@ import { createArcaClient, createFileStore } from "facturas";
 const arca = createArcaClient({
   store: createFileStore("./private-arca-store"),
 });
-const nota = await arca.vouchers.cancel(
+const nota = await arca.cancel(
   { salesPoint: 3, voucherType: 11, number: 1 },
   { idempotencyKey: "cancel-sale-example-001" }
 );

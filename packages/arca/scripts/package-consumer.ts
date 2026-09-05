@@ -108,21 +108,21 @@ export async function facadeConsumerContract(
     items: [{ gross: 12_100, vat: 21 as const }],
   };
   // @ts-expect-error A non-RI issuer cannot provide VAT items.
-  await client.vouchers.issue({ ...input, issuer: "monotributo" });
+  await client.issue({ ...input, issuer: "monotributo" });
   // @ts-expect-error An RI issuer cannot provide amount items.
-  await client.vouchers.issue({ ...input, items: [{ amount: 10_000 }] });
-  await client.vouchers.issue({
+  await client.issue({ ...input, items: [{ amount: 10_000 }] });
+  await client.issue({
     ...input,
     // @ts-expect-error Mixed gross and net on one item is not an accepted union member.
     items: [{ gross: 100, net: 100, vat: 21 }],
   });
 
-  const result = await client.vouchers.issue(input);
+  const result = await client.issue(input);
   // @ts-expect-error Exact input is opt-in and authorized-only.
   result.sent;
   switch (result.kind) {
     case "authorized":
-      await client.vouchers.cancel(result.voucher);
+      await client.cancel(result.voucher);
       result.voucher.cae satisfies string;
       result.voucher.amounts.vatAdjustment satisfies number;
       if (result.recoveredByMatch) {
@@ -153,7 +153,7 @@ export async function facadeConsumerContract(
     default:
       result satisfies never;
   }
-  const included = await client.vouchers.issue(input, {
+  const included = await client.issue(input, {
     include: { exactInput: true, raw: true },
   });
   if (included.kind === "authorized") {
@@ -172,9 +172,9 @@ export async function cancelConsumerContract(
   client: ReturnType<typeof createArcaClient>
 ) {
   // @ts-expect-error The declared VouchersService widening requires cancel on hand-built mocks.
-  const oldMock: VouchersService = { issue: client.vouchers.issue };
+  const oldMock: VouchersService = { issue: client.issue };
   oldMock.issue satisfies VouchersService["issue"];
-  const result = await client.vouchers.cancel({
+  const result = await client.cancel({
     salesPoint: 1,
     voucherType: 6,
     number: 1,
@@ -202,7 +202,7 @@ export async function cancelConsumerContract(
     default:
       result satisfies never;
   }
-  const included = await client.vouchers.cancel(
+  const included = await client.cancel(
     { salesPoint: 1, voucherType: 6, number: 1 },
     {
       idempotencyKey: "cancel-sale",

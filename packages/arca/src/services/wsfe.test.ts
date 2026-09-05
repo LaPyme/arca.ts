@@ -65,7 +65,7 @@ function createWsfeOperationResult(
 }
 
 describe("createWsfeService", () => {
-  it("authorizes a voucher with an explicit WSFE number", async () => {
+  it("issues a voucher with an explicit WSFE number", async () => {
     const options = createBaseOptions();
     options.soap.execute.mockResolvedValueOnce({
       result: {
@@ -84,25 +84,17 @@ describe("createWsfeService", () => {
     });
 
     const service = createWsfeService(options);
-    const result = await service.authorizeVoucher({
+    const result = await service.issue({
       representedTaxId: "20304050607",
       data: createBaseVoucherInput(),
       voucherNumber: 26_506,
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
+      kind: "authorized",
       cae: "123456789",
       caeExpiry: "20260501",
       voucherNumber: 26_506,
-      raw: {
-        FeDetResp: {
-          FECAEDetResponse: {
-            Resultado: "A",
-            CAE: "123456789",
-            CAEFchVto: "20260501",
-          },
-        },
-      },
     });
     expect(options.auth.login).toHaveBeenCalledOnce();
     expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
@@ -157,7 +149,7 @@ describe("createWsfeService", () => {
       },
     });
 
-    const outcome = await createWsfeService(options).authorizeVoucherOutcome({
+    const outcome = await createWsfeService(options).issue({
       data: createBaseVoucherInput(),
       voucherNumber: 77,
     });
@@ -219,7 +211,7 @@ describe("createWsfeService", () => {
     });
 
     await expect(
-      createWsfeService(detailOptions).authorizeVoucherOutcome({
+      createWsfeService(detailOptions).issue({
         data: createBaseVoucherInput(),
         voucherNumber: 77,
       })
@@ -251,7 +243,7 @@ describe("createWsfeService", () => {
     });
 
     await expect(
-      createWsfeService(headerOptions).authorizeVoucherOutcome({
+      createWsfeService(headerOptions).issue({
         data: createBaseVoucherInput(),
         voucherNumber: 77,
       })
@@ -282,7 +274,7 @@ describe("createWsfeService", () => {
     });
 
     await expect(
-      createWsfeService(infrastructureOptions).authorizeVoucherOutcome({
+      createWsfeService(infrastructureOptions).issue({
         data: createBaseVoucherInput(),
         voucherNumber: 77,
       })
@@ -308,7 +300,7 @@ describe("createWsfeService", () => {
     });
 
     await expect(
-      createWsfeService(contradictoryOptions).authorizeVoucherOutcome({
+      createWsfeService(contradictoryOptions).issue({
         data: createBaseVoucherInput(),
         voucherNumber: 77,
       })
@@ -327,7 +319,7 @@ describe("createWsfeService", () => {
     );
 
     await expect(
-      createWsfeService(options).authorizeVoucherOutcome({
+      createWsfeService(options).issue({
         data: createBaseVoucherInput(),
         voucherNumber: 77,
       })
@@ -354,7 +346,7 @@ describe("createWsfeService", () => {
     );
 
     await expect(
-      createWsfeService(options).authorizeVoucherOutcome({
+      createWsfeService(options).issue({
         data: createBaseVoucherInput(),
         voucherNumber: 77,
       })
@@ -372,100 +364,6 @@ describe("createWsfeService", () => {
     expect(options.soap.execute).toHaveBeenCalledWith(
       expect.objectContaining({ operation: "FECAESolicitar", retries: 0 })
     );
-  });
-
-  it("retries an explicit WSFE authentication rejection once with the same authorization", async () => {
-    const options = createBaseOptions();
-    options.soap.execute
-      .mockResolvedValueOnce(
-        createWsfeOperationResult("FECAESolicitar", {
-          Errors: {
-            Err: { Code: 600, Msg: "No se corresponden token y firma" },
-          },
-        })
-      )
-      .mockResolvedValueOnce(
-        createWsfeOperationResult("FECAESolicitar", {
-          FeDetResp: {
-            FECAEDetResponse: {
-              Resultado: "A",
-              CAE: "123456789",
-              CAEFchVto: "20260501",
-            },
-          },
-        })
-      );
-
-    await expect(
-      createWsfeService(options).authorizeVoucher({
-        data: createBaseVoucherInput(),
-        voucherNumber: 77,
-      })
-    ).resolves.toMatchObject({
-      cae: "123456789",
-      voucherNumber: 77,
-    });
-
-    expect(options.auth.login).toHaveBeenCalledTimes(2);
-    expect(options.auth.login).toHaveBeenNthCalledWith(
-      2,
-      "wsfe",
-      expect.objectContaining({ forceRefresh: true })
-    );
-    expect(options.soap.execute).toHaveBeenCalledTimes(2);
-    for (const [request] of options.soap.execute.mock.calls) {
-      expect(request).toMatchObject({
-        operation: "FECAESolicitar",
-        retries: 0,
-        body: {
-          FeCAEReq: {
-            FeDetReq: {
-              FECAEDetRequest: {
-                CbteDesde: 77,
-                CbteHasta: 77,
-              },
-            },
-          },
-        },
-      });
-    }
-  });
-
-  it("does not retry authorization after forceRefresh or an indeterminate failure", async () => {
-    const forcedOptions = createBaseOptions();
-    forcedOptions.soap.execute.mockResolvedValueOnce(
-      createWsfeOperationResult("FECAESolicitar", {
-        Errors: {
-          Err: { Code: 601, Msg: "CUIT representada no incluida en token" },
-        },
-      })
-    );
-
-    await expect(
-      createWsfeService(forcedOptions).authorizeVoucher({
-        data: createBaseVoucherInput(),
-        voucherNumber: 77,
-        forceRefresh: true,
-      })
-    ).rejects.toMatchObject({
-      name: "ArcaAuthenticationError",
-      reason: "missing_relationship",
-    });
-    expect(forcedOptions.auth.login).toHaveBeenCalledOnce();
-    expect(forcedOptions.soap.execute).toHaveBeenCalledOnce();
-
-    const transportOptions = createBaseOptions();
-    transportOptions.soap.execute.mockRejectedValueOnce(
-      new ArcaTransportError("connection lost")
-    );
-    await expect(
-      createWsfeService(transportOptions).authorizeVoucher({
-        data: createBaseVoucherInput(),
-        voucherNumber: 77,
-      })
-    ).rejects.toBeInstanceOf(ArcaTransportError);
-    expect(transportOptions.auth.login).toHaveBeenCalledOnce();
-    expect(transportOptions.soap.execute).toHaveBeenCalledOnce();
   });
 
   it("recovers read operations only from explicit authentication errors", async () => {
@@ -531,7 +429,7 @@ describe("createWsfeService", () => {
       },
     });
 
-    await createWsfeService(options).authorizeVoucher({
+    await createWsfeService(options).issue({
       data: createBaseVoucherInput({ exchangeRate: undefined }),
       voucherNumber: 42,
     });
@@ -563,7 +461,7 @@ describe("createWsfeService", () => {
       },
     });
 
-    await createWsfeService(options).authorizeVoucher({
+    await createWsfeService(options).issue({
       data: createBaseVoucherInput({
         totalAmount: 0.1 + 0.2,
         netAmount: 0.3,
@@ -624,7 +522,7 @@ describe("createWsfeService", () => {
     const options = createBaseOptions();
 
     expect(() =>
-      createWsfeService(options).authorizeVoucher({
+      createWsfeService(options).issue({
         data: createBaseVoucherInput(overrides),
         voucherNumber: 42,
       })
@@ -663,7 +561,7 @@ describe("createWsfeService", () => {
     const options = createBaseOptions();
 
     expect(() =>
-      createWsfeService(options).authorizeVoucherOutcome({
+      createWsfeService(options).issue({
         data: createBaseVoucherInput(overrides),
         voucherNumber: 42,
       })
@@ -695,7 +593,7 @@ describe("createWsfeService", () => {
     );
 
     await expect(
-      createWsfeService(options).authorizeVoucher({
+      createWsfeService(options).issue({
         data: createBaseVoucherInput({
           voucherType,
           vatRates: [{ id: 5, baseAmount: 90, amount: 21 }],
@@ -709,7 +607,7 @@ describe("createWsfeService", () => {
     const options = createBaseOptions();
 
     expect(() =>
-      createWsfeService(options).authorizeVoucher({
+      createWsfeService(options).issue({
         data: createBaseVoucherInput({
           voucherType: 7,
           vatRates: [{ id: 5, baseAmount: 90, amount: 20 }],
@@ -744,7 +642,7 @@ describe("createWsfeService", () => {
       },
     });
     await expect(
-      createWsfeService(absoluteOptions).authorizeVoucher({
+      createWsfeService(absoluteOptions).issue({
         data: createBaseVoucherInput({ totalAmount: 121.01 }),
         voucherNumber: 1,
       })
@@ -767,7 +665,7 @@ describe("createWsfeService", () => {
       },
     });
     await expect(
-      createWsfeService(relativeOptions).authorizeVoucher({
+      createWsfeService(relativeOptions).issue({
         data: createBaseVoucherInput({
           totalAmount: 10_001,
           netAmount: 10_000,
@@ -782,7 +680,7 @@ describe("createWsfeService", () => {
   it("requires receiver VAT condition and monetary detail before authentication", () => {
     const receiverOptions = createBaseOptions();
     expect(() =>
-      createWsfeService(receiverOptions).authorizeVoucher({
+      createWsfeService(receiverOptions).issue({
         data: createBaseVoucherInput({
           receiverVatConditionId: undefined as never,
         }),
@@ -798,7 +696,7 @@ describe("createWsfeService", () => {
 
     const vatOptions = createBaseOptions();
     expect(() =>
-      createWsfeService(vatOptions).authorizeVoucher({
+      createWsfeService(vatOptions).issue({
         data: createBaseVoucherInput({ vatRates: undefined }),
         voucherNumber: 42,
       })
@@ -812,7 +710,7 @@ describe("createWsfeService", () => {
 
     const taxOptions = createBaseOptions();
     expect(() =>
-      createWsfeService(taxOptions).authorizeVoucher({
+      createWsfeService(taxOptions).issue({
         data: createBaseVoucherInput({ totalAmount: 131, taxAmount: 10 }),
         voucherNumber: 42,
       })
