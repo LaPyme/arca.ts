@@ -37,6 +37,10 @@ jobs:
         if: matrix.node-version == 24
         run: pnpm check
 
+      - name: Check docs
+        if: matrix.node-version == 24
+        run: pnpm check:docs
+
       - name: Coverage
         if: matrix.node-version == 24
         run: pnpm test:coverage
