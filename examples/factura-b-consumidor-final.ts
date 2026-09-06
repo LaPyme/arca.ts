@@ -26,12 +26,18 @@ async function main() {
     vatRate: 21,
   });
 
-  // Single-writer convenience: coordinate this sales-point/voucher-type lane.
-  const issued = await client.wsfe.createNextVoucher({
-    data,
+  // Exact layer: reserve the number yourself, then issue it exactly once.
+  const voucherNumber = await client.wsfe.getNextVoucherNumber({
+    salesPoint: data.salesPoint,
+    voucherType: data.voucherType,
   });
+  const issued = await client.wsfe.issue({ voucherNumber, data });
 
-  console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
+  if (issued.kind === "authorized") {
+    console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
+  } else {
+    console.error(issued.kind, issued);
+  }
 }
 
 main().catch((error) => {

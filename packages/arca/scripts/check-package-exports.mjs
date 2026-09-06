@@ -19,6 +19,10 @@ const entrypoints = [
     "facturas",
     [
       "createArcaClient",
+      "createPostgresStore",
+      "createRedisStore",
+      "createFileStore",
+      "createMemoryStore",
       "buildFacturaB",
       "buildFacturaC",
       "matchWsfeVoucherIdentity",
@@ -88,7 +92,7 @@ for (const errorClass of publicErrorClasses) {
 
 const wsfeInputError = captureThrown(
   () =>
-    wsfe.createWsfeService(createServiceOptions()).authorizeVoucher({
+    wsfe.createWsfeService(createServiceOptions()).issue({
       data: createWsfeVoucherInput({ receiverVatConditionId: undefined }),
       voucherNumber: 1,
     }),
@@ -98,7 +102,7 @@ assertErrorIdentity(wsfeInputError, "ArcaInputError", "facturas/wsfe");
 
 const wsmtxcaInputError = await captureRejected(
   () =>
-    wsmtxca.createWsmtxcaService(createServiceOptions()).authorizeVoucher({
+    wsmtxca.createWsmtxcaService(createServiceOptions()).issue({
       data: {
         authRequest: { token: "caller-token", sign: "caller-sign" },
         comprobanteCAERequest: { numeroComprobante: 1 },
@@ -114,8 +118,8 @@ const wsfeAuthenticationError = await captureRejected(
       .createWsfeService(
         createServiceOptions(async () => ({
           result: {
-            FECAESolicitarResponse: {
-              FECAESolicitarResult: {
+            FECompUltimoAutorizadoResponse: {
+              FECompUltimoAutorizadoResult: {
                 Errors: {
                   Err: {
                     Code: 600,
@@ -127,7 +131,7 @@ const wsfeAuthenticationError = await captureRejected(
           },
         }))
       )
-      .authorizeVoucher({ data: createWsfeVoucherInput(), voucherNumber: 1 }),
+      .getNextVoucherNumber({ salesPoint: 1, voucherType: 6 }),
   "facturas/wsfe ArcaAuthenticationError"
 );
 assertAuthenticationErrorIdentity(wsfeAuthenticationError, "facturas/wsfe");
@@ -138,8 +142,7 @@ const wsmtxcaAuthenticationError = await captureRejected(
       .createWsmtxcaService(
         createServiceOptions(async () => ({
           result: {
-            autorizarComprobanteResponse: {
-              resultado: "R",
+            consultarUltimoComprobanteAutorizadoResponse: {
               arrayErrores: {
                 codigoDescripcion: {
                   codigo: 1000,
@@ -150,9 +153,7 @@ const wsmtxcaAuthenticationError = await captureRejected(
           },
         }))
       )
-      .authorizeVoucher({
-        data: { comprobanteCAERequest: { numeroComprobante: 1 } },
-      }),
+      .getLastAuthorizedVoucher({ voucherType: 6, salesPoint: 1 }),
   "facturas/wsmtxca ArcaAuthenticationError"
 );
 assertAuthenticationErrorIdentity(

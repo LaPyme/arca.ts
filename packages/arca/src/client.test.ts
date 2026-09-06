@@ -63,8 +63,8 @@ describe("createArcaClient", () => {
     };
     const auth = { login: vi.fn() };
     const soap = { execute: vi.fn() };
-    const wsfe = { createNextVoucher: vi.fn() };
-    const wsmtxca = { authorizeVoucher: vi.fn() };
+    const wsfe = { issue: vi.fn() };
+    const wsmtxca = { issue: vi.fn() };
     const padron = { getTaxpayerDetails: vi.fn() };
 
     mockCreateWsaaAuthModule.mockReturnValue(auth);
@@ -119,8 +119,9 @@ describe("createArcaClient", () => {
         retries: config.retries,
         retryDelay: config.retryDelay,
       },
+      issue: expect.any(Function),
+      cancel: expect.any(Function),
       wsfe,
-      vouchers: { issue: expect.any(Function) },
       wsmtxca,
       padron,
     });

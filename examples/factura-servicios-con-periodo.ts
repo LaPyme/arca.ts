@@ -18,7 +18,13 @@ const client = createArcaClient({
 });
 
 async function main() {
-  const issued = await client.wsfe.createNextVoucher({
+  // Exact layer: reserve the number yourself, then issue it exactly once.
+  const voucherNumber = await client.wsfe.getNextVoucherNumber({
+    salesPoint: 2,
+    voucherType: ARCA_VOUCHER_TYPES.FACTURA_A,
+  });
+  const issued = await client.wsfe.issue({
+    voucherNumber,
     data: {
       salesPoint: 2,
       voucherType: ARCA_VOUCHER_TYPES.FACTURA_A,
@@ -49,7 +55,11 @@ async function main() {
     },
   });
 
-  console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
+  if (issued.kind === "authorized") {
+    console.log(issued.cae, issued.caeExpiry, issued.voucherNumber);
+  } else {
+    console.error(issued.kind, issued);
+  }
 }
 
 main().catch((error) => {

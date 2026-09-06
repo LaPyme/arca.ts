@@ -72,7 +72,7 @@ function fake(
 ) {
   const wsfe = {
     getNextVoucherNumber: vi.fn().mockResolvedValue(77),
-    authorizeVoucherOutcome: vi.fn(({ data }: WsfeAuthorizeVoucherInput) => {
+    issue: vi.fn(({ data }: WsfeAuthorizeVoucherInput) => {
       // Exercise the real exact-input reconciliation on every attempted write.
       normalizeWsfeVoucherInput(data);
       return Promise.resolve(outcome);
@@ -100,7 +100,7 @@ describe("vouchers.issue", () => {
         privateKeyPem:
           "-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----",
         environment: "test",
-      }).vouchers.issue
+      }).issue
     ).toBeTypeOf("function");
   });
   it("authorizes once, exposes the sent input only on request, and passes auth options unchanged", async () => {
@@ -125,7 +125,7 @@ describe("vouchers.issue", () => {
       salesPoint: 1,
       voucherType: 6,
     });
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledExactlyOnceWith({
+    expect(wsfe.issue).toHaveBeenCalledExactlyOnceWith({
       ...auth,
       data: deriveWsfeInvoice(input).data,
       voucherNumber: 77,
@@ -134,9 +134,7 @@ describe("vouchers.issue", () => {
     if (result.kind !== "authorized") {
       throw new Error("Expected authorization");
     }
-    expect(result.sent).toEqual(
-      wsfe.authorizeVoucherOutcome.mock.calls[0][0].data
-    );
+    expect(result.sent).toEqual(wsfe.issue.mock.calls[0][0].data);
     expectNoRaw(result);
   });
   it.each([
@@ -150,7 +148,7 @@ describe("vouchers.issue", () => {
     const { service, wsfe } = fake();
     const result = await service.issue(value as IssueInput);
     expect(result.kind).toBe("authorized");
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledOnce();
+    expect(wsfe.issue).toHaveBeenCalledOnce();
   });
   it("returns provider rejection issues and does not look up or retry", async () => {
     const issue = {
@@ -174,7 +172,7 @@ describe("vouchers.issue", () => {
       attempted: { salesPoint: 1, voucherType: 6, number: 77 },
       issues: [issue],
     });
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledOnce();
+    expect(wsfe.issue).toHaveBeenCalledOnce();
     expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
   });
   it("recovers only a complete matching identity after an indeterminate attempt", async () => {
@@ -199,7 +197,7 @@ describe("vouchers.issue", () => {
       voucherType: 6,
       number: 77,
     });
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledOnce();
+    expect(wsfe.issue).toHaveBeenCalledOnce();
     expectNoRaw(result);
   });
   it.each([
@@ -228,7 +226,7 @@ describe("vouchers.issue", () => {
     expect(result.kind).toBe(kind);
     expectNoRaw(result);
     expect(result).not.toHaveProperty("sent");
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledOnce();
+    expect(wsfe.issue).toHaveBeenCalledOnce();
     expect(wsfe.lookupVoucher).toHaveBeenCalledOnce();
     if (result.kind === "conflict") {
       expect(result.reason).toContain("totalAmount");
@@ -258,7 +256,7 @@ describe("vouchers.issue", () => {
     });
     expectNoRaw(result);
     expect(JSON.stringify(result)).not.toContain("private");
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledOnce();
+    expect(wsfe.issue).toHaveBeenCalledOnce();
   });
   it.each([
     undefined,
@@ -323,7 +321,7 @@ describe("vouchers.issue", () => {
       Error
     );
     expect(wsfe.getNextVoucherNumber).not.toHaveBeenCalled();
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
     expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
   });
   it.each([
@@ -337,13 +335,13 @@ describe("vouchers.issue", () => {
       service.issue(input, options as IssueOptions)
     ).rejects.toBeInstanceOf(Error);
     expect(wsfe.getNextVoucherNumber).not.toHaveBeenCalled();
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
   });
   it("never authorizes when the next-number read fails", async () => {
     const { service, wsfe } = fake();
     wsfe.getNextVoucherNumber.mockRejectedValueOnce(new Error("Read failed"));
     await expect(service.issue(input)).rejects.toThrow("Read failed");
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
   });
   it.each([
     0,
@@ -358,7 +356,7 @@ describe("vouchers.issue", () => {
       code: "ARCA_SERVICE_ERROR",
       operation: "FECompUltimoAutorizado",
     });
-    expect(wsfe.authorizeVoucherOutcome).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
     expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
   });
   it("does not serialize concurrent calls", async () => {
@@ -366,9 +364,7 @@ describe("vouchers.issue", () => {
     await Promise.all([service.issue(input), service.issue(input)]);
     expect(wsfe.getNextVoucherNumber).toHaveBeenCalledTimes(2);
     expect(
-      wsfe.authorizeVoucherOutcome.mock.calls.map(
-        ([attempt]) => attempt.voucherNumber
-      )
+      wsfe.issue.mock.calls.map(([attempt]) => attempt.voucherNumber)
     ).toEqual([77, 77]);
   });
   it("snapshots caller assertions before awaiting the sequence read", async () => {
@@ -377,9 +373,7 @@ describe("vouchers.issue", () => {
     const running = service.issue({ ...input, items });
     items[0].gross = 100;
     await running;
-    expect(wsfe.authorizeVoucherOutcome.mock.calls[0][0].data.totalAmount).toBe(
-      121
-    );
+    expect(wsfe.issue.mock.calls[0][0].data.totalAmount).toBe(121);
   });
   it("handles authorized exact evidence without expiry conservatively", async () => {
     const { service, wsfe } = fake(
@@ -390,7 +384,7 @@ describe("vouchers.issue", () => {
       kind: "indeterminate",
       lookup: { kind: "incomplete" },
     });
-    expect(wsfe.authorizeVoucherOutcome).toHaveBeenCalledOnce();
+    expect(wsfe.issue).toHaveBeenCalledOnce();
   });
 });
 

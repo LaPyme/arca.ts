@@ -284,7 +284,7 @@ function deriveService(service: IssueCommon["service"], date: WsfeDateInput) {
   return { concept: 2, serviceStartDate, serviceEndDate, paymentDueDate };
 }
 
-function buenosAiresDate(now: Date): WsfeDateInput {
+export function buenosAiresDate(now: Date): WsfeDateInput {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
     year: "numeric",
@@ -312,15 +312,12 @@ export function assertIssueKeys(
   for (const key of Object.keys(value)) {
     if (!keys.includes(key)) {
       const field = prefix === "input" ? key : `${prefix}.${key}`;
-      throw new ArcaInputError(
-        `${field} is not supported by vouchers.issue().`,
-        {
-          code: "ARCA_INPUT_RESERVED_FIELD",
-          field,
-          expected:
-            "a supported facade field; use the exact API for other fiscal fields",
-        }
-      );
+      throw new ArcaInputError(`${field} is not supported by issue().`, {
+        code: "ARCA_INPUT_RESERVED_FIELD",
+        field,
+        expected:
+          "a supported facade field; use the exact API for other fiscal fields",
+      });
     }
   }
 }

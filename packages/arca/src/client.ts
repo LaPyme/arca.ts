@@ -1,6 +1,10 @@
-import { assertArcaClientConfig, normalizeArcaClientConfig } from "./config";
+import {
+  assertArcaClientConfig,
+  discoverArcaClientConfig,
+  normalizeArcaClientConfig,
+} from "./config";
 import { createArcaLogger } from "./internal/logger";
-import type { ArcaClientConfig, ArcaEnvironment } from "./internal/types";
+import type { ArcaClientOptions, ArcaEnvironment } from "./internal/types";
 import { createPadronService, type PadronService } from "./services/padron";
 import {
   createVouchersService,
@@ -10,6 +14,7 @@ import { createWsfeService, type WsfeService } from "./services/wsfe";
 import { createWsmtxcaService, type WsmtxcaService } from "./services/wsmtxca";
 import { createSoapTransport } from "./soap";
 import { createWsaaAuthModule } from "./wsaa";
+import { createWsaaStoreAdapter } from "./wsaa/store-adapter";
 
 /** Immutable, credential-free operational view of an ARCA client configuration. */
 export type ArcaClientConfigView = Readonly<{
@@ -23,8 +28,11 @@ export type ArcaClientConfigView = Readonly<{
 /** Fully wired ARCA client with access to all service modules. */
 export type ArcaClient = {
   readonly config: ArcaClientConfigView;
+  /** Issues an invoice from business input. Idempotent with a store and key. */
+  issue: VouchersService["issue"];
+  /** Issues a full credit note against an authorized invoice. */
+  cancel: VouchersService["cancel"];
   wsfe: WsfeService;
-  vouchers: VouchersService;
   wsmtxca: WsmtxcaService;
   padron: PadronService;
 };
@@ -32,13 +40,19 @@ export type ArcaClient = {
 /**
  * Creates an ARCA client from the given configuration.
  * Validates the config, wires WSAA authentication and SOAP transport,
- * and returns an object with `.vouchers`, `.wsfe`, `.wsmtxca`, and `.padron` service modules.
+ * and returns an object with `issue()`, `cancel()` and the `.wsfe`, `.wsmtxca`, and `.padron` service modules.
  *
  * @throws {ArcaConfigurationError} When the config is missing or invalid.
  */
-export function createArcaClient(config: ArcaClientConfig): ArcaClient {
-  assertArcaClientConfig(config);
-  const normalizedConfig = normalizeArcaClientConfig(config);
+export function createArcaClient(config: ArcaClientOptions = {}): ArcaClient {
+  const discovered = discoverArcaClientConfig(config);
+  assertArcaClientConfig(discovered);
+  const normalizedConfig = normalizeArcaClientConfig(discovered);
+  if (normalizedConfig.store && !normalizedConfig.wsaaSessionStore) {
+    normalizedConfig.wsaaSessionStore = createWsaaStoreAdapter(
+      normalizedConfig.store
+    );
+  }
   const logger = createArcaLogger(normalizedConfig.logger);
 
   const auth = createWsaaAuthModule({ config: normalizedConfig, logger });
@@ -52,10 +66,12 @@ export function createArcaClient(config: ArcaClientConfig): ArcaClient {
   });
 
   const wsfe = createWsfeService({ config: normalizedConfig, auth, soap });
+  const vouchers = createVouchersService(wsfe, normalizedConfig);
   return {
     config: publicConfig,
+    issue: vouchers.issue,
+    cancel: vouchers.cancel,
     wsfe,
-    vouchers: createVouchersService(wsfe),
     wsmtxca: createWsmtxcaService({ config: normalizedConfig, auth, soap }),
     padron: createPadronService({ config: normalizedConfig, auth, soap }),
   };
