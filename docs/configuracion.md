@@ -37,17 +37,12 @@ const client = createArcaClient({
 });
 ```
 
-<!-- TODO: verificar -->
-La fila `environment` de esta tabla dice `test` donde las demás nombran la
-variable de entorno, y `createArcaClient()` lanza `ArcaConfigurationError`
-cuando no hay ni `environment` ni `ARCA_ENVIRONMENT`.
-
 | Campo | Por defecto | Descripción |
 | --- | --- | --- |
 | `taxId` | `ARCA_TAX_ID` | CUIT de 11 dígitos |
 | `certificatePem` | `ARCA_CERTIFICATE_PEM` | Certificado PEM |
 | `privateKeyPem` | `ARCA_PRIVATE_KEY_PEM` | Clave privada PEM |
-| `environment` | `test` | `test` o `production` |
+| `environment` | `ARCA_ENVIRONMENT` | `test` o `production`. Sin valor por defecto: si falta en ambos lados, `createArcaClient()` lanza `ArcaConfigurationError` |
 | `timeout` | `30000` | Timeout de la request HTTP en milisegundos |
 | `retries` | `0` | Intentos extra, solo ante fallas de transporte |
 | `retryDelay` | `500` | Espera entre reintentos de transporte en milisegundos |
