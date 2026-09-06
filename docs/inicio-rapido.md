@@ -5,8 +5,8 @@
 Necesitás CUIT, certificado y clave privada, la relación del certificado con
 el servicio **Facturación Electrónica**, y un punto de venta habilitado para
 web services. Homologación y producción tienen certificados y puntos de venta
-propios. Consultá la [documentación oficial](https://www.arca.gob.ar/ws/documentacion/ws-factura-electronica.asp).
-El SDK no hace estas habilitaciones por vos.
+propios. El SDK no hace estas habilitaciones por vos: el paso a paso y las
+referencias oficiales están en [Habilitación en ARCA](./habilitacion-arca.md).
 
 ## 2. Instalá
 
@@ -25,7 +25,7 @@ completos. No los subas al repositorio. No hay entorno predeterminado: `test`
 apunta a homologación y `production` a los servidores reales.
 Los campos explícitos de `createArcaClient()` tienen prioridad.
 
-Creá una vez la tabla [Postgres del README](../README.md#postgres) y usá:
+Creá una vez la tabla [Postgres](./stores.md#postgres) y usá:
 
 ```ts
 import { createArcaClient, createPostgresStore } from "facturas";
@@ -38,7 +38,9 @@ const arca = createArcaClient({
 
 Un solo `store` guarda tickets WSAA y reservas de comprobantes. También hay
 adaptadores Redis, archivos y memoria; memoria sirve para pruebas y no
-sobrevive al reinicio del proceso.
+sobrevive al reinicio del proceso. Están todos en [Stores](./stores.md).
+El resto de las opciones del cliente está en
+[Configuración](./configuracion.md).
 
 ## 4. Emití la primera factura
 
@@ -59,7 +61,8 @@ const factura = await arca.issue(
 
 El importe se expresa en centavos. Para responsables inscriptos usá
 `issuer: "responsable_inscripto"` e ítems como `{ gross: 12_100, vat: 21 }`.
-ARCA valida la habilitación fiscal; el SDK no infiere tu condición.
+ARCA valida la habilitación fiscal; el SDK no infiere tu condición. Todos los
+campos del input están en [Facturas](./facturas.md#datos-de-la-factura).
 
 Antes de emitir podés revisar lo que el SDK va a enviar con
 `arca.preview(input)`: es sincrónico, no hace ninguna llamada y devuelve la
@@ -75,7 +78,10 @@ llamá a `issue()`.
 - `conflict`: hay otro comprobante en ese número; detené el flujo e investigá.
 
 La evidencia SOAP y el input exacto no aparecen por defecto. Podés pedirlos
-con `include: { raw: true, exactInput: true }`.
+con `include: { raw: true, exactInput: true }`. Qué llamadas hace cada camino
+está en
+[Contrato fiscal de la fachada](./facturas.md#contrato-fiscal-de-la-fachada).
+Cuando una llamada falla, mirá [Errores](./errores.md).
 
 ## 6. Reintentá con la misma clave
 
@@ -121,4 +127,6 @@ La nota es una segunda operación; si falla, la factura sigue pendiente.
 extensiones. La clase, el receptor, la moneda, el concepto y las fechas de
 servicio salen del original; vos aportás las líneas y, como mucho, el punto de
 venta y la fecha de la nota. Para períodos asociados, notas de débito u otros
-casos usá `wsfe.issue()`.
+casos usá `wsfe.issue()`, en [Capa exacta](./capa-exacta.md).
+
+Las reglas completas están en [Notas de crédito](./notas-de-credito.md).

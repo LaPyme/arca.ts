@@ -22,6 +22,7 @@ los términos de ARCA quedan como están en el código.
 - [Referencia](./referencia.md): constantes, API pública con semver y
   seguridad.
 - [Ejemplos](./ejemplos.md): índice de [examples/](../examples).
+- [English summary](./en/README.md): a short overview in English.
 
 Para mantenedores: [docs/external/README.md](./external/README.md) registra qué
 reglas del manual de ARCA codifica el SDK y contra qué versión del documento se
