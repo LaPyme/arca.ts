@@ -8,7 +8,6 @@ import {
 import {
   classifyArcaAuthenticationError,
   classifyArcaAuthenticationIssues,
-  createArcaAuthenticationErrorFromEvidence,
   createArcaAuthenticationEvidence,
   executeWithAuthenticationRecovery,
 } from "../internal/authentication";
@@ -122,14 +121,6 @@ export type WsfeAuthorizeVoucherInput = {
   forceRefresh?: boolean;
 };
 
-/** Result of a successful WSFE voucher authorization. */
-export type WsfeAuthorizationResult = {
-  cae: string;
-  caeExpiry: string;
-  voucherNumber: number;
-  raw: Record<string, unknown>;
-};
-
 /** Structured evidence from one exact WSFE authorization attempt. */
 export type WsfeAuthorizationOutcome = ArcaAuthorizationOutcome<"wsfe">;
 
@@ -217,27 +208,6 @@ export type WsfeService = {
    * (`authorized`, `rejected` or `indeterminate`) instead of throwing.
    */
   issue(input: WsfeAuthorizeVoucherInput): Promise<WsfeAuthorizationOutcome>;
-  /** @deprecated Renamed to `issue()`. Removed in the next minor release. */
-  authorizeVoucherOutcome(
-    input: WsfeAuthorizeVoucherInput
-  ): Promise<WsfeAuthorizationOutcome>;
-  /**
-   * @deprecated Throws instead of returning evidence, which loses the
-   * rejected/indeterminate distinction. Use `issue()`. Removed in the next
-   * minor release.
-   */
-  authorizeVoucher(
-    input: WsfeAuthorizeVoucherInput
-  ): Promise<WsfeAuthorizationResult>;
-  /**
-   * @deprecated Reads the next number and authorizes in one non-idempotent
-   * call. Use `client.issue()` or reserve a number and call `wsfe.issue()`.
-   */
-  createNextVoucher(input: {
-    representedTaxId?: number | string;
-    data: WsfeVoucherInput;
-    forceRefresh?: boolean;
-  }): Promise<WsfeAuthorizationResult>;
   /** Returns the next available voucher number for the given sales point and type. */
   getNextVoucherNumber(input: {
     representedTaxId?: number | string;
@@ -515,21 +485,6 @@ export function createWsfeService(
     return getWsfeResultEntries(result, resultKey).map(mapWsfeCatalogEntry);
   }
 
-  function authorizeVoucher({
-    representedTaxId,
-    data,
-    voucherNumber,
-    forceRefresh,
-  }: WsfeAuthorizeVoucherInput): Promise<WsfeAuthorizationResult> {
-    const normalizedInput = normalizeWsfeVoucherInput(data);
-    return authorizeNormalizedVoucher({
-      representedTaxId,
-      data: normalizedInput,
-      voucherNumber,
-      forceRefresh,
-    });
-  }
-
   function issue({
     representedTaxId,
     data,
@@ -543,84 +498,6 @@ export function createWsfeService(
       voucherNumber,
       forceRefresh,
     }).then(({ outcome }) => outcome);
-  }
-
-  function authorizeNormalizedVoucher({
-    representedTaxId,
-    data: normalizedInput,
-    voucherNumber,
-    forceRefresh,
-    allowAuthenticationRecovery,
-  }: {
-    representedTaxId?: number | string;
-    data: NormalizedWsfeVoucherInput;
-    voucherNumber: number;
-    forceRefresh?: boolean;
-    allowAuthenticationRecovery?: boolean;
-  }): Promise<WsfeAuthorizationResult> {
-    return executeWithAuthenticationRecovery({
-      service: "wsfe",
-      operation: "FECAESolicitar",
-      forceRefresh,
-      allowRetry: allowAuthenticationRecovery,
-      execute: (attemptForceRefresh) =>
-        authorizeNormalizedVoucherOnce({
-          representedTaxId,
-          data: normalizedInput,
-          voucherNumber,
-          forceRefresh: attemptForceRefresh,
-        }),
-    });
-  }
-
-  async function authorizeNormalizedVoucherOnce({
-    representedTaxId,
-    data: normalizedInput,
-    voucherNumber,
-    forceRefresh,
-  }: {
-    representedTaxId?: number | string;
-    data: NormalizedWsfeVoucherInput;
-    voucherNumber: number;
-    forceRefresh?: boolean;
-  }): Promise<WsfeAuthorizationResult> {
-    const execution = await executeWsfeAuthorization({
-      representedTaxId,
-      data: normalizedInput,
-      voucherNumber,
-      forceRefresh,
-    });
-
-    if (execution.error) {
-      throw execution.error;
-    }
-
-    if (execution.outcome.kind !== "authorized") {
-      throw createWsfeOutcomeError(execution.outcome);
-    }
-
-    const { cae, caeExpiry, raw } = execution.outcome;
-    if (!(caeExpiry && raw)) {
-      throw new ArcaServiceError("WSFE did not return CAE authorization data", {
-        service: "wsfe",
-        operation: "FECAESolicitar",
-        result: execution.outcome.result,
-        resultLevel: execution.outcome.resultLevel,
-        results: execution.outcome.results,
-        cae,
-        issues: [
-          ...execution.outcome.errors,
-          ...execution.outcome.observations,
-        ],
-      });
-    }
-
-    return {
-      cae,
-      caeExpiry,
-      voucherNumber,
-      raw,
-    };
   }
 
   async function executeWsfeAuthorization({
@@ -759,25 +636,6 @@ export function createWsfeService(
 
   return {
     issue,
-    authorizeVoucherOutcome: issue,
-    authorizeVoucher,
-    async createNextVoucher({ representedTaxId, data, forceRefresh }) {
-      const normalizedInput = normalizeWsfeVoucherInput(data);
-
-      const voucherNumber = await getNextVoucherNumber({
-        representedTaxId,
-        salesPoint: normalizedInput.salesPoint,
-        voucherType: normalizedInput.voucherType,
-        forceRefresh,
-      });
-
-      return authorizeNormalizedVoucher({
-        representedTaxId,
-        data: normalizedInput,
-        voucherNumber,
-        allowAuthenticationRecovery: forceRefresh !== true,
-      });
-    },
     getNextVoucherNumber,
     getLastVoucher(input) {
       return getNextVoucherNumber(input);
@@ -1892,42 +1750,6 @@ function getArcaIndeterminateReason(
     return "invalid_response";
   }
   return "unexpected_error";
-}
-
-function createWsfeOutcomeError(
-  outcome: Exclude<WsfeAuthorizationOutcome, { kind: "authorized" }>
-) {
-  if (outcome.kind === "indeterminate" && outcome.authentication) {
-    return createArcaAuthenticationErrorFromEvidence(outcome.authentication, {
-      service: "wsfe",
-      operation: outcome.operation,
-    });
-  }
-
-  const issues = [...outcome.errors, ...outcome.observations];
-  const firstIssue = issues[0];
-  const message = firstIssue
-    ? formatWsfeIssue(firstIssue)
-    : outcome.kind === "rejected"
-      ? "WSFE rejected the voucher authorization"
-      : outcome.result === "A"
-        ? "WSFE did not return CAE authorization data"
-        : "WSFE did not return conclusive voucher authorization data";
-
-  return new ArcaServiceError(message, {
-    service: "wsfe",
-    operation: outcome.operation,
-    ...(firstIssue?.code === undefined ? {} : { serviceCode: firstIssue.code }),
-    ...(outcome.result === undefined ? {} : { result: outcome.result }),
-    ...(outcome.resultLevel === undefined
-      ? {}
-      : { resultLevel: outcome.resultLevel }),
-    results: outcome.results,
-    ...(outcome.kind === "indeterminate" && outcome.cae
-      ? { cae: outcome.cae }
-      : {}),
-    issues,
-  });
 }
 
 function createWsfeServiceError(operation: string, issues: ArcaFiscalIssue[]) {

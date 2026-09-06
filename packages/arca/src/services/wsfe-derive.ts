@@ -326,12 +326,13 @@ export function assertIssueObject(
 export function assertIssueKeys(
   value: object,
   keys: readonly string[],
-  prefix: string
+  prefix: string,
+  method = "issue()"
 ): void {
   for (const key of Object.keys(value)) {
     if (!keys.includes(key)) {
       const field = prefix === "input" ? key : `${prefix}.${key}`;
-      throw new ArcaInputError(`${field} is not supported by issue().`, {
+      throw new ArcaInputError(`${field} is not supported by ${method}.`, {
         code: "ARCA_INPUT_RESERVED_FIELD",
         field,
         expected:

@@ -499,47 +499,6 @@ describe("createWsmtxcaService", () => {
     });
   });
 
-  it("deprecated authorizeVoucher raises service errors for rejected authorizations", async () => {
-    const options = createBaseOptions();
-    options.soap.execute.mockResolvedValueOnce({
-      result: {
-        autorizarComprobanteResponse: {
-          resultado: "R",
-          arrayErrores: {
-            codigoDescripcion: [
-              {
-                codigo: 514,
-                descripcion: "El Importe IVA del ítem no debe informarse",
-              },
-            ],
-          },
-          arrayObservaciones: {
-            codigoDescripcion: {
-              codigo: 504,
-              descripcion: "Código de producto sin GS1 válido",
-            },
-          },
-        },
-      },
-    });
-
-    await expect(
-      createWsmtxcaService(options).authorizeVoucher({
-        data: {
-          comprobanteCAERequest: {
-            numeroComprobante: 9,
-          },
-        },
-      })
-    ).rejects.toMatchObject({
-      name: "ArcaServiceError",
-      message:
-        "Error 514: El Importe IVA del ítem no debe informarse | Obs 504: Código de producto sin GS1 válido",
-    });
-    expect(options.auth.login).toHaveBeenCalledOnce();
-    expect(options.soap.execute).toHaveBeenCalledOnce();
-  });
-
   it("normalizes WSMTXCA latest error 1502 to an empty sequence", async () => {
     const options = createBaseOptions();
     options.soap.execute.mockResolvedValueOnce({

@@ -1,13 +1,14 @@
 import { createArcaClient, createFileStore } from "facturas";
 
 // Configure ARCA credentials and a private durable directory before running.
-// Both the original invoice and its credit note remain in ARCA's records.
+// ARCA has no cancellation: this writes a real credit note for the whole
+// invoice. Both the original and the note remain in ARCA's records.
 const arca = createArcaClient({
   store: createFileStore("./private-arca-store"),
 });
-const nota = await arca.cancel(
-  { salesPoint: 3, voucherType: 11, number: 1 },
-  { idempotencyKey: "cancel-sale-example-001" }
+const nota = await arca.issueCreditNote(
+  { for: { salesPoint: 3, voucherType: 11, number: 1 }, all: true },
+  { idempotencyKey: "nota-de-credito-total-example-001" }
 );
 switch (nota.kind) {
   case "authorized":

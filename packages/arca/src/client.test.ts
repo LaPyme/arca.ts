@@ -121,7 +121,7 @@ describe("createArcaClient", () => {
       },
       issue: expect.any(Function),
       preview: expect.any(Function),
-      cancel: expect.any(Function),
+      issueCreditNote: expect.any(Function),
       wsfe,
       wsmtxca,
       padron,

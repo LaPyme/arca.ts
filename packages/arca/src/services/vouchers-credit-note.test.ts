@@ -1,15 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { createMemoryStore } from "../store/memory";
+import { type ArcaAttemptRecord, attemptKey } from "../store/types";
 import { createVouchersService } from "./vouchers";
 import type { IssueOptions } from "./vouchers-types";
 import {
   normalizeWsfeVoucherInput,
   type WsfeAuthorizationOutcome,
   type WsfeAuthorizeVoucherInput,
-  type WsfeDateInput,
   type WsfeVoucherInput,
   type WsfeVoucherLookupResult,
 } from "./wsfe";
+import type { CreditNoteInput } from "./wsfe-credit-note";
 import { deriveWsfeInvoice } from "./wsfe-derive";
 
 const data = deriveWsfeInvoice({
@@ -20,10 +21,14 @@ const data = deriveWsfeInvoice({
   items: [{ amount: 100 }],
 }).data;
 const target = { salesPoint: 1, voucherType: 11, number: 1 };
-const options = {
-  date: "20260905" as WsfeDateInput,
-  idempotencyKey: "cancel-sale",
+const note: CreditNoteInput = { for: target, all: true, date: "20260905" };
+const partial: CreditNoteInput = {
+  for: target,
+  items: [{ amount: 40 }],
+  date: "20260905",
 };
+const options = { idempotencyKey: "credit-note-sale" };
+const key = attemptKey("test", "20123456789", options.idempotencyKey);
 const base = {
   service: "wsfe" as const,
   operation: "FECAESolicitar",
@@ -70,7 +75,7 @@ function found(sent = data, number = 1): WsfeVoucherLookupResult {
 function fake() {
   const store = createMemoryStore();
   const calls: string[] = [];
-  let note: WsfeVoucherInput | undefined;
+  let written: WsfeVoucherInput | undefined;
   const wsfe = {
     getNextVoucherNumber: vi.fn(() => {
       calls.push("next");
@@ -78,14 +83,14 @@ function fake() {
     }),
     issue: vi.fn(({ data: sent }: WsfeAuthorizeVoucherInput) => {
       normalizeWsfeVoucherInput(sent);
-      note = sent;
+      written = sent;
       calls.push("authorize");
       return Promise.resolve(authorized);
     }),
     lookupVoucher: vi.fn(({ voucherType }: { voucherType: number }) => {
       calls.push("lookup");
       return Promise.resolve(
-        voucherType === 11 ? found() : note ? found(note, 9) : absent
+        voucherType === 11 ? found() : written ? found(written, 9) : absent
       );
     }),
   };
@@ -100,14 +105,14 @@ function fake() {
     }),
   };
 }
-describe("cancel orchestration", () => {
+
+describe("credit note orchestration", () => {
   it.each([
     false,
     true,
   ])("looks up original before numbering; keyed=%s", async (keyed) => {
     const { service, calls } = fake();
-    const result = await service.cancel(target, {
-      date: options.date,
+    const result = await service.issueCreditNote(note, {
       ...(keyed ? { idempotencyKey: options.idempotencyKey } : {}),
       include: { exactInput: true },
     });
@@ -118,11 +123,49 @@ describe("cancel orchestration", () => {
       sent: { associatedVouchers: [{ type: 11, number: 1 }] },
     });
   });
+  it("credits chosen items with the same single-write sequence", async () => {
+    const { service, calls, wsfe } = fake();
+    const result = await service.issueCreditNote(partial, {
+      ...options,
+      include: { exactInput: true },
+    });
+    expect(calls).toEqual(["lookup", "next", "authorize"]);
+    expect(result).toMatchObject({
+      kind: "authorized",
+      voucher: {
+        voucherType: 13,
+        voucherClass: "C",
+        number: 9,
+        amounts: { computedTotal: 40, sentTotal: 40, vatAdjustment: 0 },
+      },
+      sent: {
+        totalAmount: 0.4,
+        netAmount: 0.4,
+        associatedVouchers: [{ type: 11, salesPoint: 1, number: 1 }],
+      },
+    });
+    expect(wsfe.issue.mock.calls[0][0].data.totalAmount).toBe(0.4);
+  });
+  it.each([
+    ["all", note],
+    ["items", partial],
+  ] as const)("records operation creditNote for the %s mode", async (_mode, input) => {
+    const { service, store } = fake();
+    await service.issueCreditNote(input, options);
+    const record = JSON.parse((await store.get(key)) ?? "null");
+    expect(record).toMatchObject({
+      v: 1,
+      operation: "creditNote",
+      number: 9,
+      salesPoint: 1,
+      voucherType: 13,
+    });
+  });
   it("replays with only one lookup of the reserved note", async () => {
     const { service, wsfe, calls } = fake();
-    await service.cancel(target, options);
+    await service.issueCreditNote(note, options);
     calls.length = 0;
-    expect(await service.cancel(target, options)).toMatchObject({
+    expect(await service.issueCreditNote(note, options)).toMatchObject({
       kind: "authorized",
       recoveredByMatch: true,
       voucher: { number: 9 },
@@ -136,7 +179,7 @@ describe("cancel orchestration", () => {
   it("not_found original throws before numbering and writes", async () => {
     const { service, wsfe } = fake();
     wsfe.lookupVoucher.mockResolvedValue(absent);
-    await expect(service.cancel(target, options)).rejects.toThrow(
+    await expect(service.issueCreditNote(note, options)).rejects.toThrow(
       "original voucher not found"
     );
     expect(wsfe.getNextVoucherNumber).not.toHaveBeenCalled();
@@ -145,32 +188,81 @@ describe("cancel orchestration", () => {
   it("validates locally and requires a store before original lookup", async () => {
     const { service, wsfe } = fake();
     for (const value of [
-      { ...target, number: 0 },
-      { ...target, salesPoint: Number.NaN },
-      { ...target, voucherType: 13 },
+      { ...note, for: { ...target, number: 0 } },
+      { ...note, for: { ...target, salesPoint: Number.NaN } },
+      { ...note, for: { ...target, voucherType: 13 } },
+      { ...note, salesPoint: 0 },
+      { ...note, date: "20260230" },
     ]) {
-      await expect(service.cancel(value, options)).rejects.toMatchObject({
-        code: "ARCA_INPUT_INVALID_VALUE",
-      });
+      await expect(
+        service.issueCreditNote(value as CreditNoteInput, options)
+      ).rejects.toMatchObject({ code: expect.stringContaining("ARCA_INPUT_") });
     }
     await expect(
-      createVouchersService(wsfe).cancel(target, options)
+      createVouchersService(wsfe).issueCreditNote(note, options)
     ).rejects.toMatchObject({ code: "ARCA_CONFIGURATION_ERROR" });
     await expect(
-      service.cancel(target, { idempotencyKey: 1 } as unknown as IssueOptions)
+      service.issueCreditNote(note, {
+        idempotencyKey: 1,
+      } as unknown as IssueOptions)
     ).rejects.toMatchObject({ code: "ARCA_INPUT_INVALID_VALUE" });
     expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
   });
-  it("mismatched target, date, or operation fails without provider calls", async () => {
+  it.each([
+    ["neither mode", { for: target }],
+    ["both modes", { for: target, all: true, items: [{ amount: 40 }] }],
+    ["all: false", { for: target, all: false }],
+    ["all with a total", { for: target, all: true, total: 40 }],
+    ["a debit note target", { for: { ...target, voucherType: 12 }, all: true }],
+    [
+      "an A debit note target",
+      { for: { ...target, voucherType: 2 }, all: true },
+    ],
+    [
+      "a B debit note target",
+      { for: { ...target, voucherType: 7 }, all: true },
+    ],
+    ["an associated period", { for: target, all: true, associatedPeriod: {} }],
+    ["a receiver", { for: target, all: true, to: { condition: "exento" } }],
+    ["a currency", { for: target, all: true, currency: "USD" }],
+    ["an issuer", { for: target, all: true, issuer: "monotributo" }],
+    ["an unknown target field", { for: { ...target, cuit: "20123456789" } }],
+    ["items that are not an array", { for: target, items: 5 }],
+    ["an empty target", { for: null, all: true }],
+  ])("rejects %s before any I/O", async (_case, input) => {
+    const { service, wsfe, store } = fake();
+    await expect(
+      service.issueCreditNote(input as CreditNoteInput, options)
+    ).rejects.toMatchObject({
+      name: "ArcaInputError",
+      message: expect.stringContaining("issueCreditNote"),
+    });
+    expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
+    expect(wsfe.getNextVoucherNumber).not.toHaveBeenCalled();
+    expect(wsfe.issue).not.toHaveBeenCalled();
+    expect(await store.get(key)).toBeNull();
+  });
+  it("never mutates the note after the caller's array changes", async () => {
     const { service, wsfe } = fake();
-    await service.cancel(target, options);
+    const items = [{ amount: 40 }];
+    const running = service.issueCreditNote({ for: target, items });
+    items[0].amount = 100;
+    await running;
+    expect(wsfe.issue.mock.calls[0][0].data.totalAmount).toBe(0.4);
+  });
+  it("mismatched target, date, mode or operation fails without provider calls", async () => {
+    const { service, wsfe } = fake();
+    await service.issueCreditNote(note, options);
     vi.clearAllMocks();
-    await expect(
-      service.cancel({ ...target, number: 2 }, options)
-    ).rejects.toMatchObject({ code: "ARCA_INPUT_IDEMPOTENCY_MISMATCH" });
-    await expect(
-      service.cancel(target, { ...options, date: "20260906" })
-    ).rejects.toMatchObject({ code: "ARCA_INPUT_IDEMPOTENCY_MISMATCH" });
+    for (const value of [
+      { ...note, for: { ...target, number: 2 } },
+      { ...note, date: "20260906" },
+      partial,
+    ] as CreditNoteInput[]) {
+      await expect(
+        service.issueCreditNote(value, options)
+      ).rejects.toMatchObject({ code: "ARCA_INPUT_IDEMPOTENCY_MISMATCH" });
+    }
     await expect(
       service.issue(
         {
@@ -185,6 +277,31 @@ describe("cancel orchestration", () => {
     expect(wsfe.lookupVoucher).not.toHaveBeenCalled();
     expect(wsfe.issue).not.toHaveBeenCalled();
   });
+  it("replays items against a key reserved with items", async () => {
+    const { service, wsfe } = fake();
+    await service.issueCreditNote(partial, options);
+    vi.clearAllMocks();
+    await expect(
+      service.issueCreditNote({ ...partial, items: [{ amount: 41 }] }, options)
+    ).rejects.toMatchObject({ code: "ARCA_INPUT_IDEMPOTENCY_MISMATCH" });
+    expect(wsfe.issue).not.toHaveBeenCalled();
+  });
+  it("rejects a 0.9 cancel reservation as an invalid structure", async () => {
+    const { service, store, wsfe } = fake();
+    await service.issueCreditNote(note, options);
+    const record = JSON.parse(
+      (await store.get(key)) ?? "null"
+    ) as ArcaAttemptRecord;
+    await store.set(
+      key,
+      JSON.stringify({ ...record, operation: "cancel" as const })
+    );
+    vi.clearAllMocks();
+    await expect(service.issueCreditNote(note, options)).rejects.toMatchObject({
+      code: "ARCA_CONFIGURATION_ERROR",
+    });
+    expect(wsfe.issue).not.toHaveBeenCalled();
+  });
   it.each([
     "incomplete",
     "conflict",
@@ -192,7 +309,7 @@ describe("cancel orchestration", () => {
     "not_found",
   ])("replay %s preserves the I/O bound", async (mode) => {
     const { service, wsfe } = fake();
-    await service.cancel(target, options);
+    await service.issueCreditNote(note, options);
     const sent = wsfe.issue.mock.calls[0][0].data;
     const lookup = found(sent, 9);
     if (lookup.kind !== "found") {
@@ -213,7 +330,7 @@ describe("cancel orchestration", () => {
         mode === "not_found" ? absent : lookup
       );
     }
-    const result = await service.cancel(target, options);
+    const result = await service.issueCreditNote(note, options);
     expect(result.kind).toBe(
       mode === "not_found"
         ? "authorized"
@@ -234,7 +351,7 @@ describe("cancel orchestration", () => {
         reason: "transport_error",
       });
     });
-    expect(await service.cancel(target, options)).toMatchObject({
+    expect(await service.issueCreditNote(note, options)).toMatchObject({
       kind: "authorized",
       recoveredByMatch: true,
     });
@@ -242,10 +359,10 @@ describe("cancel orchestration", () => {
   });
 });
 
-it("cancel recovers concurrent keyed writes through 10016", async () => {
+it("issueCreditNote recovers concurrent keyed writes through 10016", async () => {
   const { service, wsfe } = fake();
   let writes = 0;
-  let note: WsfeVoucherInput | undefined;
+  let written: WsfeVoucherInput | undefined;
   let release: () => void = () => undefined;
   const waiting = new Promise<void>((resolve) => {
     release = resolve;
@@ -254,13 +371,13 @@ it("cancel recovers concurrent keyed writes through 10016", async () => {
     Promise.resolve(
       voucherType === 11
         ? found()
-        : writes < 2 || !note
+        : writes < 2 || !written
           ? absent
-          : found(note, 9)
+          : found(written, 9)
     )
   );
   wsfe.issue.mockImplementation(async ({ data: sent }) => {
-    note = sent;
+    written = sent;
     writes++;
     if (writes === 1) {
       await waiting;
@@ -285,8 +402,8 @@ it("cancel recovers concurrent keyed writes through 10016", async () => {
     };
   });
   const results = await Promise.all([
-    service.cancel(target, options),
-    service.cancel(target, options),
+    service.issueCreditNote(note, options),
+    service.issueCreditNote(note, options),
   ]);
   expect(results.map((result) => result.kind)).toEqual([
     "authorized",
