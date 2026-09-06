@@ -61,6 +61,12 @@ El importe se expresa en centavos. Para responsables inscriptos usá
 `issuer: "responsable_inscripto"` e ítems como `{ gross: 12_100, vat: 21 }`.
 ARCA valida la habilitación fiscal; el SDK no infiere tu condición.
 
+Antes de emitir podés revisar lo que el SDK va a enviar con
+`arca.preview(input)`: es sincrónico, no hace ninguna llamada y devuelve la
+clase, el tipo de comprobante, los `amounts` y el request exacto. Compará
+`preview(input).amounts.sentTotal` con el total de tu venta y recién entonces
+llamá a `issue()`.
+
 ## 5. Tratá todos los resultados
 
 - `authorized`: guardá `factura.voucher` y su CAE.
@@ -85,18 +91,34 @@ guardan el número fiscal que el reintento debe consultar.
 
 Habilitá el certificado y punto de venta de producción y cambiá
 `ARCA_ENVIRONMENT=production`. Una prueba de ARS 1 usa `items: [{ amount: 100 }]`.
-Para anularla por su importe completo:
+Esa factura **es un documento real y queda registrada**.
+
+## 8. Emití una nota de crédito
+
+ARCA no anula comprobantes: una corrección es una nota de crédito, que también
+es un documento real. Lo habitual es la nota parcial, que acredita las líneas
+que elegís:
 
 ```ts
 if (factura.kind === "authorized") {
-  const nota = await arca.cancel(factura.voucher, {
-    idempotencyKey: `cancel:${venta.id}`,
-  });
+  const nota = await arca.issueCreditNote(
+    {
+      for: factura.voucher,
+      items: [{ amount: 50 }], // ARS 0,50 de una factura de ARS 1,00.
+    },
+    { idempotencyKey: `nc:${venta.id}` },
+  );
   console.log(nota); // También debe tratarse cada resultado de la nota.
 }
 ```
 
-La factura y la nota de crédito **son documentos reales y quedan registrados**.
+Con `all: true` en lugar de `items` acreditás el total del original. El modo es
+explícito y obligatorio: sin `items` ni `all: true`, el SDK falla antes de
+cualquier llamada, así un campo olvidado nunca acredita la factura entera.
+
 La nota es una segunda operación; si falla, la factura sigue pendiente.
-`cancel()` admite facturas A, B y C en ARS o USD, sin tributos ni extensiones.
-Para notas parciales u otros casos usá la API exacta.
+`issueCreditNote()` admite facturas A, B y C en ARS o USD, sin tributos ni
+extensiones. La clase, el receptor, la moneda, el concepto y las fechas de
+servicio salen del original; vos aportás las líneas y, como mucho, el punto de
+venta y la fecha de la nota. Para períodos asociados, notas de débito u otros
+casos usá `wsfe.issue()`.
