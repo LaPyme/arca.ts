@@ -8,6 +8,7 @@ prueba en homologación.
 
 ## Fachada
 
+- [Primera factura, sin store ni clave](../examples/primera-factura.ts)
 - [Factura con clave de idempotencia](../examples/issue-invoice.ts)
 - [Previsualizar antes de emitir](../examples/preview.ts)
 - [Nota de crédito parcial](../examples/nota-de-credito-parcial.ts)

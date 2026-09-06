@@ -15,27 +15,25 @@ pnpm add facturas
 ## Issue an invoice
 
 Set `ARCA_TAX_ID`, `ARCA_CERTIFICATE_PEM`, `ARCA_PRIVATE_KEY_PEM` and
-`ARCA_ENVIRONMENT`, provision the store table, and pass the sale's stable ID as
-the idempotency key. Amounts are integer minor units.
+`ARCA_ENVIRONMENT`. Nothing else is required: no database, no table, no
+external service. Amounts are integer minor units.
 
 ```ts
-import { createArcaClient, createPostgresStore } from "facturas";
-import { sql } from "@vercel/postgres";
+import { createArcaClient } from "facturas";
 
-const arca = createArcaClient({
-  store: createPostgresStore({ query: (text, params) => sql.query(text, params) }),
+const arca = createArcaClient();
+
+const factura = await arca.issue({
+  issuer: "monotributo",
+  salesPoint: 3,
+  to: { condition: "consumidor_final" },
+  items: [{ amount: 150_000 }], // ARS 1.500,00 in minor units
 });
-
-const factura = await arca.issue(
-  {
-    issuer: "monotributo",
-    salesPoint: 3,
-    to: { condition: "consumidor_final" },
-    items: [{ amount: 150_000 }], // ARS 1.500,00 in minor units
-  },
-  { idempotencyKey: venta.id },
-);
 ```
+
+**Safe retries** are strongly recommended and optional: pass a `store` and the
+sale's stable ID as `idempotencyKey`, and a retry after a crash consults the
+reserved number instead of issuing again. See [stores.md](../stores.md).
 
 ## Issue a credit note
 

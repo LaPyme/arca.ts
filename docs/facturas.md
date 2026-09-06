@@ -4,11 +4,33 @@
 el número y recuperá los reintentos. Para los campos que no deriva, usá la
 [capa exacta](./capa-exacta.md).
 
-## Emitir con clave de idempotencia
+## Emitir
 
-Definí las [variables de entorno](./configuracion.md#variables-de-entorno),
-creá la tabla del [store](./stores.md#postgres) y usá el ID estable de la venta
-como clave. El ejemplo asume que `venta` es tu venta.
+Definí las [variables de entorno](./configuracion.md#variables-de-entorno).
+No hace falta store ni ningún servicio externo. Este bloque es
+[examples/primera-factura.ts](../examples/primera-factura.ts):
+
+```ts
+import { createArcaClient } from "facturas";
+
+const arca = createArcaClient();
+
+const factura = await arca.issue({
+  issuer: "monotributo",
+  salesPoint: 3,
+  to: { condition: "consumidor_final" },
+  items: [{ amount: 150_000 }], // ARS 1.500,00 en centavos
+});
+```
+
+## Reintentos seguros con clave de idempotencia
+
+Recomendado en toda aplicación real, opcional para empezar. Sin
+`idempotencyKey`, un reintento después de una caída puede emitir la factura
+dos veces. Configurá un `store` y pasá el ID estable de la venta como clave:
+el reintento consulta el número reservado y nunca vuelve a emitir. El ejemplo
+asume que `venta` es tu venta y que la tabla del
+[store](./stores.md#postgres) existe.
 
 ```ts
 import { createArcaClient, createPostgresStore } from "facturas";
@@ -18,20 +40,8 @@ const arca = createArcaClient({
   store: createPostgresStore({ query: (text, params) => sql.query(text, params) }),
 });
 
-const factura = await arca.issue(
-  {
-    issuer: "monotributo",
-    salesPoint: 3,
-    to: { condition: "consumidor_final" },
-    items: [{ amount: 150_000 }], // ARS 1.500,00 en centavos
-  },
-  { idempotencyKey: venta.id },
-);
+const factura = await arca.issue(input, { idempotencyKey: venta.id });
 ```
-
-Sin `idempotencyKey`, un reintento después de una caída puede emitir la factura
-dos veces. Configurá un `store` y pasá la clave para que los reintentos sean
-seguros.
 
 Una clave tiene de 1 a 255 caracteres. Usá el ID de la venta o del pedido,
 nunca un UUID nuevo por intento. No pongas CUIT, DNI ni otros datos personales

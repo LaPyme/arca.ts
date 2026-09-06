@@ -25,38 +25,28 @@ completos. No los subas al repositorio. No hay entorno predeterminado: `test`
 apunta a homologación y `production` a los servidores reales.
 Los campos explícitos de `createArcaClient()` tienen prioridad.
 
-Creá una vez la tabla [Postgres](./stores.md#postgres) y usá:
-
 ```ts
-import { createArcaClient, createPostgresStore } from "facturas";
-import { sql } from "@vercel/postgres";
+import { createArcaClient } from "facturas";
 
-const arca = createArcaClient({
-  store: createPostgresStore({ query: (text, params) => sql.query(text, params) }),
-});
+const arca = createArcaClient();
 ```
 
-Un solo `store` guarda tickets WSAA y reservas de comprobantes. También hay
-adaptadores Redis, archivos y memoria; memoria sirve para pruebas y no
-sobrevive al reinicio del proceso. Están todos en [Stores](./stores.md).
-El resto de las opciones del cliente está en
-[Configuración](./configuracion.md).
+Con eso alcanza para emitir: el cliente lee las variables de entorno y guarda
+el ticket WSAA en memoria. No necesitás base de datos ni ningún servicio
+externo. El resto de las opciones está en [Configuración](./configuracion.md).
 
 ## 4. Emití la primera factura
 
-`venta.id` es el identificador estable de tu venta. Elegí tu condición real de
-emisor y tu punto de venta habilitado:
+Elegí tu condición real de emisor y tu punto de venta habilitado. Este bloque
+es [examples/primera-factura.ts](../examples/primera-factura.ts):
 
 ```ts
-const factura = await arca.issue(
-  {
-    issuer: "monotributo",
-    salesPoint: 3,
-    to: { condition: "consumidor_final" },
-    items: [{ amount: 150_000 }], // ARS 1.500,00 en centavos
-  },
-  { idempotencyKey: venta.id },
-);
+const factura = await arca.issue({
+  issuer: "monotributo",
+  salesPoint: 3,
+  to: { condition: "consumidor_final" },
+  items: [{ amount: 150_000 }], // ARS 1.500,00 en centavos
+});
 ```
 
 El importe se expresa en centavos. Para responsables inscriptos usá
@@ -74,7 +64,7 @@ llamá a `issue()`.
 
 - `authorized`: guardá `factura.voucher` y su CAE.
 - `rejected`: revisá los errores que devolvió ARCA.
-- `indeterminate`: conservá el número y la evidencia; conciliá o repetí con la misma clave e input.
+- `indeterminate`: conservá el número y la evidencia; conciliá o repetí el mismo input (con su clave, ver el paso 6).
 - `conflict`: hay otro comprobante en ese número; detené el flujo e investigá.
 
 La evidencia SOAP y el input exacto no aparecen por defecto. Podés pedirlos
@@ -83,10 +73,29 @@ está en
 [Contrato fiscal de la fachada](./facturas.md#contrato-fiscal-de-la-fachada).
 Cuando una llamada falla, mirá [Errores](./errores.md).
 
-## 6. Reintentá con la misma clave
+## 6. Hacé seguros los reintentos
 
-Sin `idempotencyKey`, un reintento después de una caída puede emitir la factura
-dos veces. Configurá un `store` y pasá la clave para que los reintentos sean seguros.
+Recomendado en toda aplicación real, opcional para empezar. Sin
+`idempotencyKey`, un reintento después de una caída puede emitir la factura
+dos veces. Configurá un `store` y pasá el ID estable de la venta como clave:
+el reintento consulta el número reservado y nunca vuelve a emitir.
+
+Creá una vez la tabla [Postgres](./stores.md#postgres) y usá:
+
+```ts
+import { createArcaClient, createPostgresStore } from "facturas";
+import { sql } from "@vercel/postgres";
+
+const arca = createArcaClient({
+  store: createPostgresStore({ query: (text, params) => sql.query(text, params) }),
+});
+
+const factura = await arca.issue(input, { idempotencyKey: venta.id });
+```
+
+Un solo `store` guarda tickets WSAA y reservas de comprobantes. También hay
+adaptadores Redis, archivos y memoria; memoria sirve para pruebas y no
+sobrevive al reinicio del proceso. Están todos en [Stores](./stores.md).
 
 Usá de 1 a 255 caracteres, sin CUIT, DNI ni otros datos personales. No generes
 una clave nueva por intento. Una clave con un input diferente produce

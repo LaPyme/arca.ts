@@ -34,31 +34,24 @@ npm install facturas
 
 ## Emití tu primera factura
 
-Definí las [variables de entorno](./docs/configuracion.md#variables-de-entorno),
-creá la tabla del [store](./docs/stores.md#postgres) y usá el ID estable de la
-venta como clave de idempotencia.
+Definí las [variables de entorno](./docs/configuracion.md#variables-de-entorno)
+con tu CUIT, certificado y clave. No hace falta nada más: ni base de datos, ni
+tabla, ni servicio externo.
 
 ```ts
-import { createArcaClient, createPostgresStore } from "facturas";
-import { sql } from "@vercel/postgres";
+import { createArcaClient } from "facturas";
 
-const arca = createArcaClient({
-  store: createPostgresStore({ query: (text, params) => sql.query(text, params) }),
+const arca = createArcaClient();
+
+const factura = await arca.issue({
+  issuer: "monotributo",
+  salesPoint: 3,
+  to: { condition: "consumidor_final" },
+  items: [{ amount: 150_000 }], // ARS 1.500,00 en centavos
 });
-
-const factura = await arca.issue(
-  {
-    issuer: "monotributo",
-    salesPoint: 3,
-    to: { condition: "consumidor_final" },
-    items: [{ amount: 150_000 }], // ARS 1.500,00 en centavos
-  },
-  { idempotencyKey: venta.id },
-);
 ```
 
-Sin `idempotencyKey`, un reintento después de una caída puede emitir la factura
-dos veces. Tratá siempre los cuatro resultados:
+Tratá siempre los cuatro resultados:
 
 | Resultado | Significado y acción del llamador |
 | --- | --- |
@@ -69,6 +62,27 @@ dos veces. Tratá siempre los cuatro resultados:
 
 El paso a paso está en [Inicio rápido](./docs/inicio-rapido.md); el detalle, en
 [Facturas](./docs/facturas.md).
+
+## Reintentos seguros
+
+Recomendado en toda aplicación real, opcional para empezar. Sin
+`idempotencyKey`, un reintento después de una caída puede emitir la factura dos
+veces. Con un `store` y el ID estable de la venta como clave, el reintento
+consulta el número reservado y nunca vuelve a emitir.
+
+```ts
+import { createArcaClient, createPostgresStore } from "facturas";
+import { sql } from "@vercel/postgres";
+
+const arca = createArcaClient({
+  store: createPostgresStore({ query: (text, params) => sql.query(text, params) }),
+});
+
+const factura = await arca.issue(input, { idempotencyKey: venta.id });
+```
+
+Hay adaptadores para Postgres, Redis, archivos y memoria, y podés escribir el
+tuyo. Ver [Stores](./docs/stores.md).
 
 ## Nota de crédito
 
