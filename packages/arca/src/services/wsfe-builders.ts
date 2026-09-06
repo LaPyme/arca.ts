@@ -87,7 +87,7 @@ export function buildFacturaB(input: BuildFacturaBInput): WsfeVoucherInput {
   }
 
   const { data } = calculateWsfeAmounts({
-    issuer: "responsable_inscripto",
+    voucherClass: "B",
     items: [{ net: input.taxableAmount, vat: input.vatRate }],
   });
   for (const rate of data.vatRates ?? []) {
@@ -105,7 +105,7 @@ export function buildFacturaB(input: BuildFacturaBInput): WsfeVoucherInput {
 export function buildFacturaC(input: BuildFacturaCInput): WsfeVoucherInput {
   assertArcaMinorUnits(input.amount, "amount");
   const { data } = calculateWsfeAmounts({
-    issuer: "monotributo",
+    voucherClass: "C",
     items: [{ amount: input.amount }],
   });
   return Object.freeze({

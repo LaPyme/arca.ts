@@ -23,6 +23,17 @@ export type IssuedVoucher = VoucherCoordinates & {
   amounts: IssueAmounts;
 };
 
+/**
+ * What issue() would send, derived with zero I/O. The voucher number is absent
+ * because it is only known when the number is reserved at issuance.
+ */
+export type IssuePreview = {
+  voucherClass: VoucherClass;
+  voucherType: number;
+  amounts: IssueAmounts;
+  request: WsfeVoucherInput;
+};
+
 type WithRaw<T, O extends IssueOptions> = T &
   (true extends NonNullable<O["include"]>["raw"]
     ? { raw?: Record<string, unknown> }

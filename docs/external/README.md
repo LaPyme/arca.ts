@@ -46,18 +46,28 @@ This note is a focused extraction, not a replacement for the complete manual.
 
 ## Credit and debit notes
 
-Re-downloaded 2026-09-04; the v4.7 checksum above is unchanged.
+Re-downloaded 2026-09-04; the v4.7 checksum above is unchanged. Rules 10040
+and 10197 were re-read against the same pinned file on 2026-09-06.
 
 | Rule | Physical PDF pages | Contract |
 | --- | --- | --- |
-| 10197 | 67-68 | Notes require associated vouchers or an associated period. |
-| 10040 | 46-47 | Credit notes 3, 8 and 13 may associate invoices 1, 6 and 11 respectively. |
+| 10197 | 67-68 | Notes require associated vouchers or an associated period. Re-checked 2026-09-06: the rule reads "Si el comprobante es Debito o Credito, se deberá informar de forma obligatoria los campos Fecha Comprobantes Asociados Desde/Hasta, o al menos un comprobante asociado", so a single associated invoice satisfies it and no manual rule ties the note's amount to the associated voucher. A partial-amount ordinary credit note with one associated invoice and no further field is allowed. |
+| 10040 | 46-47 | Credit notes 3, 8 and 13 may associate invoices 1, 6 and 11 respectively. Re-checked 2026-09-06: the full lists on page 47 are 1, 2, 3, 4, 5, 34, 39, 60, 63, 88 and 991 for 2 and 3; 6, 7, 8, 9, 10, 35, 40, 61, 64, 88 and 991 for 7 and 8; and 11, 12, 13 and 15 for 12 and 13. Debit notes 2, 7 and 12 are therefore allowed association targets for credit notes 3, 8 and 13; the facade still accepts only invoices 1, 6 and 11. |
+| 10237 | 75-76 | A credit note whose amount exceeds the associated voucher it adjusts is an observation, not a rejection. The CAEA list repeats it as observation 818 (page 159). |
+| CbtesAsoc structure | 31 | An associated voucher requires only Tipo, PtoVta and Nro; Cuit and CbteFch are optional. |
 | 10031-10033, 10035-10036 | 45-46 | Service dates and due date accompany each other; start cannot exceed end; due date cannot precede issuance. |
 | 10210-10212 | 68-69 | Association dates must be valid; a later electronic original must be in the same month/year. |
 | 10242-10243, 10246 | 71 | Receiver VAT condition is required and must suit the voucher class. |
 | 10122 | 57-58 | Receiver matching applies to the listed remittance types, not ordinary invoices. |
 | 10183 | 66 | Issuer and receiver matching is explicit for MiPyMEs notes. |
 | 10151 | 61 | An optional associated issuer CUIT must have eleven digits; MiPyMEs notes require it. |
+
+The extra association obligations at 10153-10160 (pages 61-63) - a mandatory
+associated voucher, a mandatory associated date, the issuer CUIT match and the
+single associated invoice - are written for MiPyMEs (FCE) notes only and do not
+reach ordinary notes 3, 8 and 13. Together with the CbtesAsoc structure on page
+31 this means an ordinary partial credit note needs no field that
+FECompConsultar on the original does not return.
 
 For ordinary full credit notes, preserving the original receiver document and
 VAT condition is the facade contract; the narrower matching validations above

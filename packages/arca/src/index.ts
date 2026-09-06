@@ -61,6 +61,7 @@ export type {
   IssuedVoucher,
   IssueOptions,
   IssueOutcome,
+  IssuePreview,
 } from "./services/vouchers-types";
 export type {
   CreateWsfeServiceOptions,
@@ -69,7 +70,6 @@ export type {
   WsfeAssociatedPeriod,
   WsfeAssociatedVoucher,
   WsfeAuthorizationOutcome,
-  WsfeAuthorizationResult,
   WsfeAuthorizeVoucherInput,
   WsfeBuyer,
   WsfeCatalogEntry,
@@ -101,6 +101,7 @@ export type {
   WsfeBuilderVatRate,
 } from "./services/wsfe-builders";
 export { buildFacturaB, buildFacturaC } from "./services/wsfe-builders";
+export type { CreditNoteInput } from "./services/wsfe-credit-note";
 export type { IssueCommon, IssueInput, Receiver } from "./services/wsfe-derive";
 export type {
   VoucherCoordinates,
@@ -111,7 +112,6 @@ export { matchWsfeVoucherIdentity } from "./services/wsfe-identity";
 export type {
   CreateWsmtxcaServiceOptions,
   WsmtxcaAuthorizationOutcome,
-  WsmtxcaAuthorizationResult,
   WsmtxcaAuthorizeVoucherInput,
   WsmtxcaLastAuthorizedVoucherResult,
   WsmtxcaSalesPoint,

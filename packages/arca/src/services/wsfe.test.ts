@@ -124,73 +124,6 @@ describe("createWsfeService", () => {
     );
   });
 
-  it("deprecated authorizeVoucher still returns the CAE for an explicit number", async () => {
-    const options = createBaseOptions();
-    options.soap.execute.mockResolvedValueOnce({
-      result: {
-        FECAESolicitarResponse: {
-          FECAESolicitarResult: {
-            FeDetResp: {
-              FECAEDetResponse: {
-                Resultado: "A",
-                CAE: "123456789",
-                CAEFchVto: "20260501",
-              },
-            },
-          },
-        },
-      },
-    });
-
-    const service = createWsfeService(options);
-    const result = await service.authorizeVoucher({
-      representedTaxId: "20304050607",
-      data: createBaseVoucherInput(),
-      voucherNumber: 26_506,
-    });
-
-    expect(result).toEqual({
-      cae: "123456789",
-      caeExpiry: "20260501",
-      voucherNumber: 26_506,
-      raw: {
-        FeDetResp: {
-          FECAEDetResponse: {
-            Resultado: "A",
-            CAE: "123456789",
-            CAEFchVto: "20260501",
-          },
-        },
-      },
-    });
-    expect(options.auth.login).toHaveBeenCalledOnce();
-    expect(options.auth.login).toHaveBeenCalledWith("wsfe", {
-      representedTaxId: "20304050607",
-    });
-    expect(options.soap.execute).toHaveBeenCalledOnce();
-    expect(options.soap.execute).toHaveBeenCalledWith(
-      expect.objectContaining({
-        service: "wsfe",
-        operation: "FECAESolicitar",
-        body: expect.objectContaining({
-          FeCAEReq: expect.objectContaining({
-            FeCabReq: {
-              CantReg: 1,
-              PtoVta: 1,
-              CbteTipo: 6,
-            },
-            FeDetReq: {
-              FECAEDetRequest: expect.objectContaining({
-                CbteDesde: 26_506,
-                CbteHasta: 26_506,
-              }),
-            },
-          }),
-        }),
-      })
-    );
-  });
-
   it("returns authorized evidence with every WSFE observation", async () => {
     const options = createBaseOptions();
     options.soap.execute.mockResolvedValueOnce({
@@ -811,229 +744,48 @@ describe("createWsfeService", () => {
       message:
         "exchangeRate must be a positive decimal with at most 4 integer and 6 fractional digits.",
     },
-  ])("rejects $name before network work", async ({
-    overrides,
-    code,
-    message,
-  }) => {
+  ])("rejects $name before network work", ({ overrides, code, message }) => {
     const options = createBaseOptions();
 
-    await expect(
-      createWsfeService(options).createNextVoucher({
+    expect(() =>
+      createWsfeService(options).issue({
         data: createBaseVoucherInput(overrides),
+        voucherNumber: 42,
       })
-    ).rejects.toMatchObject({
-      name: "ArcaInputError",
-      code,
-      field: "exchangeRate",
-      message,
-    });
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaInputError",
+        code,
+        field: "exchangeRate",
+        message,
+      })
+    );
     expect(options.auth.login).not.toHaveBeenCalled();
     expect(options.soap.execute).not.toHaveBeenCalled();
   });
 
-  it("creates the next voucher and wraps WSFE collection fields", async () => {
-    const options = createBaseOptions();
-    options.soap.execute
-      .mockResolvedValueOnce({
-        result: {
-          FECompUltimoAutorizadoResponse: {
-            FECompUltimoAutorizadoResult: {
-              CbteNro: 41,
-            },
-          },
-        },
-      })
-      .mockResolvedValueOnce({
-        result: {
-          FECAESolicitarResponse: {
-            FECAESolicitarResult: {
-              FeDetResp: {
-                FECAEDetResponse: [
-                  {
-                    Resultado: "A",
-                    CAE: "123456789",
-                    CAEFchVto: "20260501",
-                  },
-                ],
-              },
-            },
-          },
-        },
-      });
-
-    const service = createWsfeService(options);
-    const result = await service.createNextVoucher({
-      representedTaxId: "20304050607",
-      forceRefresh: true,
-      data: createBaseVoucherInput({
-        currencyId: "USD",
-        totalAmount: 131,
-        taxAmount: 10,
-        associatedVouchers: [{ type: 1, salesPoint: 1, number: 1 }],
-        taxes: [{ id: 99, baseAmount: 100, rate: 10, amount: 10 }],
-        vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
-        optionalFields: [{ id: "27", value: "test" }],
-        activities: [{ id: 46_123 }],
-        sameCurrencyForeignCancellation: "S",
-      }),
-    });
-
-    expect(result).toEqual({
-      cae: "123456789",
-      caeExpiry: "20260501",
-      voucherNumber: 42,
-      raw: {
-        FeDetResp: {
-          FECAEDetResponse: [
-            {
-              Resultado: "A",
-              CAE: "123456789",
-              CAEFchVto: "20260501",
-            },
-          ],
-        },
-      },
-    });
-    expect(options.auth.login).toHaveBeenNthCalledWith(1, "wsfe", {
-      representedTaxId: "20304050607",
-      forceRefresh: true,
-    });
-    expect(options.auth.login).toHaveBeenNthCalledWith(2, "wsfe", {
-      representedTaxId: "20304050607",
-    });
-    expect(options.soap.execute.mock.calls[1]?.[0]).toMatchObject({
-      service: "wsfe",
-      operation: "FECAESolicitar",
-      body: {
-        Auth: {
-          Token: "token",
-          Sign: "sign",
-          Cuit: 20_304_050_607,
-        },
-        FeCAEReq: {
-          FeCabReq: {
-            CantReg: 1,
-            PtoVta: 1,
-            CbteTipo: 6,
-          },
-          FeDetReq: {
-            FECAEDetRequest: {
-              CbteDesde: 42,
-              CbteHasta: 42,
-              CondicionIVAReceptorId: 5,
-              CanMisMonExt: "S",
-              MonId: "USD",
-              CbtesAsoc: {
-                CbteAsoc: [{ Tipo: 1, PtoVta: 1, Nro: 1 }],
-              },
-              Tributos: {
-                Tributo: [
-                  {
-                    Id: 99,
-                    BaseImp: "100.00",
-                    Alic: "10.00",
-                    Importe: "10.00",
-                  },
-                ],
-              },
-              Iva: {
-                AlicIva: [{ Id: 5, BaseImp: "100.00", Importe: "21.00" }],
-              },
-              Opcionales: {
-                Opcional: [{ Id: "27", Valor: "test" }],
-              },
-              Actividades: {
-                Actividad: [{ Id: 46_123 }],
-              },
-            },
-          },
-        },
-      },
-    });
-  });
-
-  it("retries createNextVoucher with the originally fetched voucher number", async () => {
-    const options = createBaseOptions();
-    options.soap.execute
-      .mockResolvedValueOnce(
-        createWsfeOperationResult("FECompUltimoAutorizado", { CbteNro: 41 })
-      )
-      .mockResolvedValueOnce(
-        createWsfeOperationResult("FECAESolicitar", {
-          Errors: {
-            Err: { Code: 600, Msg: "No se corresponden token y firma" },
-          },
-        })
-      )
-      .mockResolvedValueOnce(
-        createWsfeOperationResult("FECAESolicitar", {
-          FeDetResp: {
-            FECAEDetResponse: {
-              Resultado: "A",
-              CAE: "123456789",
-              CAEFchVto: "20260501",
-            },
-          },
-        })
-      );
-
-    await expect(
-      createWsfeService(options).createNextVoucher({
-        data: createBaseVoucherInput(),
-      })
-    ).resolves.toMatchObject({ voucherNumber: 42, cae: "123456789" });
-
-    expect(options.soap.execute).toHaveBeenCalledTimes(3);
-    expect(
-      options.soap.execute.mock.calls.map(([request]) => request.operation)
-    ).toEqual(["FECompUltimoAutorizado", "FECAESolicitar", "FECAESolicitar"]);
-    const authorizationRequests = options.soap.execute.mock.calls.slice(1);
-    for (const [request] of authorizationRequests) {
-      expect(request.body.FeCAEReq.FeDetReq.FECAEDetRequest).toMatchObject({
-        CbteDesde: 42,
-        CbteHasta: 42,
-      });
-      expect(request.retries).toBe(0);
-    }
-    expect(options.auth.login).toHaveBeenCalledTimes(3);
-    expect(options.auth.login).toHaveBeenLastCalledWith(
-      "wsfe",
-      expect.objectContaining({ forceRefresh: true })
-    );
-  });
-
   it("omits MonCotiz when foreign-currency vouchers are cancelled in the same currency", async () => {
     const options = createBaseOptions();
-    options.soap.execute
-      .mockResolvedValueOnce({
-        result: {
-          FECompUltimoAutorizadoResponse: {
-            FECompUltimoAutorizadoResult: {
-              CbteNro: 41,
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: [
+                {
+                  Resultado: "A",
+                  CAE: "123456789",
+                  CAEFchVto: "20260501",
+                },
+              ],
             },
           },
         },
-      })
-      .mockResolvedValueOnce({
-        result: {
-          FECAESolicitarResponse: {
-            FECAESolicitarResult: {
-              FeDetResp: {
-                FECAEDetResponse: [
-                  {
-                    Resultado: "A",
-                    CAE: "123456789",
-                    CAEFchVto: "20260501",
-                  },
-                ],
-              },
-            },
-          },
-        },
-      });
+      },
+    });
 
-    await createWsfeService(options).createNextVoucher({
+    await createWsfeService(options).issue({
+      voucherNumber: 42,
       data: createBaseVoucherInput({
         currencyId: "USD",
         exchangeRate: undefined,
@@ -1042,7 +794,7 @@ describe("createWsfeService", () => {
     });
 
     const request =
-      options.soap.execute.mock.calls[1]?.[0].body.FeCAEReq.FeDetReq
+      options.soap.execute.mock.calls[0]?.[0].body.FeCAEReq.FeDetReq
         .FECAEDetRequest;
 
     expect(request).toMatchObject({
@@ -1054,42 +806,33 @@ describe("createWsfeService", () => {
 
   it("does not send CanMisMonExt for peso vouchers", async () => {
     const options = createBaseOptions();
-    options.soap.execute
-      .mockResolvedValueOnce({
-        result: {
-          FECompUltimoAutorizadoResponse: {
-            FECompUltimoAutorizadoResult: {
-              CbteNro: 41,
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: [
+                {
+                  Resultado: "A",
+                  CAE: "123456789",
+                  CAEFchVto: "20260501",
+                },
+              ],
             },
           },
         },
-      })
-      .mockResolvedValueOnce({
-        result: {
-          FECAESolicitarResponse: {
-            FECAESolicitarResult: {
-              FeDetResp: {
-                FECAEDetResponse: [
-                  {
-                    Resultado: "A",
-                    CAE: "123456789",
-                    CAEFchVto: "20260501",
-                  },
-                ],
-              },
-            },
-          },
-        },
-      });
+      },
+    });
 
-    await createWsfeService(options).createNextVoucher({
+    await createWsfeService(options).issue({
+      voucherNumber: 42,
       data: createBaseVoucherInput({
         sameCurrencyForeignCancellation: "S",
       }),
     });
 
     const request =
-      options.soap.execute.mock.calls[1]?.[0].body.FeCAEReq.FeDetReq
+      options.soap.execute.mock.calls[0]?.[0].body.FeCAEReq.FeDetReq
         .FECAEDetRequest;
 
     expect(request).toMatchObject({
@@ -1101,36 +844,27 @@ describe("createWsfeService", () => {
 
   it("normalizes supported date inputs before sending the SOAP request", async () => {
     const options = createBaseOptions();
-    options.soap.execute
-      .mockResolvedValueOnce({
-        result: {
-          FECompUltimoAutorizadoResponse: {
-            FECompUltimoAutorizadoResult: {
-              CbteNro: 41,
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: [
+                {
+                  Resultado: "A",
+                  CAE: "123456789",
+                  CAEFchVto: "20260501",
+                },
+              ],
             },
           },
         },
-      })
-      .mockResolvedValueOnce({
-        result: {
-          FECAESolicitarResponse: {
-            FECAESolicitarResult: {
-              FeDetResp: {
-                FECAEDetResponse: [
-                  {
-                    Resultado: "A",
-                    CAE: "123456789",
-                    CAEFchVto: "20260501",
-                  },
-                ],
-              },
-            },
-          },
-        },
-      });
+      },
+    });
 
     const service = createWsfeService(options);
-    await service.createNextVoucher({
+    await service.issue({
+      voucherNumber: 42,
       data: createBaseVoucherInput({
         voucherDate: "2026-05-01",
         serviceStartDate: "2026-05-01",
@@ -1147,7 +881,7 @@ describe("createWsfeService", () => {
       }),
     });
 
-    expect(options.soap.execute.mock.calls[1]?.[0]).toMatchObject({
+    expect(options.soap.execute.mock.calls[0]?.[0]).toMatchObject({
       body: {
         FeCAEReq: {
           FeDetReq: {
@@ -1172,36 +906,27 @@ describe("createWsfeService", () => {
 
   it("sends PeriodoAsoc with normalized dates when provided", async () => {
     const options = createBaseOptions();
-    options.soap.execute
-      .mockResolvedValueOnce({
-        result: {
-          FECompUltimoAutorizadoResponse: {
-            FECompUltimoAutorizadoResult: {
-              CbteNro: 41,
+    options.soap.execute.mockResolvedValueOnce({
+      result: {
+        FECAESolicitarResponse: {
+          FECAESolicitarResult: {
+            FeDetResp: {
+              FECAEDetResponse: [
+                {
+                  Resultado: "A",
+                  CAE: "123456789",
+                  CAEFchVto: "20260501",
+                },
+              ],
             },
           },
         },
-      })
-      .mockResolvedValueOnce({
-        result: {
-          FECAESolicitarResponse: {
-            FECAESolicitarResult: {
-              FeDetResp: {
-                FECAEDetResponse: [
-                  {
-                    Resultado: "A",
-                    CAE: "123456789",
-                    CAEFchVto: "20260501",
-                  },
-                ],
-              },
-            },
-          },
-        },
-      });
+      },
+    });
 
     const service = createWsfeService(options);
-    await service.createNextVoucher({
+    await service.issue({
+      voucherNumber: 42,
       data: createBaseVoucherInput({
         associatedPeriod: {
           startDate: "2026-05-01",
@@ -1210,7 +935,7 @@ describe("createWsfeService", () => {
       }),
     });
 
-    expect(options.soap.execute.mock.calls[1]?.[0]).toMatchObject({
+    expect(options.soap.execute.mock.calls[0]?.[0]).toMatchObject({
       body: {
         FeCAEReq: {
           FeDetReq: {
@@ -1226,12 +951,13 @@ describe("createWsfeService", () => {
     });
   });
 
-  it("rejects invalid associated period dates before SOAP calls", async () => {
+  it("rejects invalid associated period dates before SOAP calls", () => {
     const options = createBaseOptions();
     const service = createWsfeService(options);
 
-    await expect(
-      service.createNextVoucher({
+    expect(() =>
+      service.issue({
+        voucherNumber: 42,
         data: createBaseVoucherInput({
           associatedPeriod: {
             startDate: "05/01/2026" as never,
@@ -1239,48 +965,18 @@ describe("createWsfeService", () => {
           },
         }),
       })
-    ).rejects.toMatchObject({
-      name: "ArcaInputError",
-      code: "ARCA_INPUT_INVALID_DATE",
-      field: "associatedPeriod.startDate",
-      message:
-        "Invalid WSFE associatedPeriod.startDate: expected a YYYY-MM-DD or YYYYMMDD string",
-    });
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaInputError",
+        code: "ARCA_INPUT_INVALID_DATE",
+        field: "associatedPeriod.startDate",
+        message:
+          "Invalid WSFE associatedPeriod.startDate: expected a YYYY-MM-DD or YYYYMMDD string",
+      })
+    );
 
     expect(options.auth.login).not.toHaveBeenCalled();
     expect(options.soap.execute).not.toHaveBeenCalled();
-  });
-
-  it("allows destructuring without breaking createNextVoucher", async () => {
-    const options = createBaseOptions();
-    options.soap.execute
-      .mockResolvedValueOnce({
-        result: {
-          FECompUltimoAutorizadoResponse: {
-            FECompUltimoAutorizadoResult: { CbteNro: 0 },
-          },
-        },
-      })
-      .mockResolvedValueOnce({
-        result: {
-          FECAESolicitarResponse: {
-            FECAESolicitarResult: {
-              FeDetResp: {
-                FECAEDetResponse: [
-                  { Resultado: "A", CAE: "999", CAEFchVto: "20260601" },
-                ],
-              },
-            },
-          },
-        },
-      });
-
-    const { createNextVoucher } = createWsfeService(options);
-    const result = await createNextVoucher({
-      data: createBaseVoucherInput(),
-    });
-
-    expect(result.cae).toBe("999");
   });
 
   it("supports both next-voucher method names", async () => {
@@ -1311,122 +1007,51 @@ describe("createWsfeService", () => {
     ).resolves.toBe(42);
   });
 
-  it("raises service errors for rejected vouchers and missing CAE data", async () => {
-    const rejectedOptions = createBaseOptions();
-    rejectedOptions.soap.execute
-      .mockResolvedValueOnce({
-        result: {
-          FECompUltimoAutorizadoResponse: {
-            FECompUltimoAutorizadoResult: {
-              CbteNro: 4,
-            },
-          },
-        },
-      })
-      .mockResolvedValueOnce({
-        result: {
-          FECAESolicitarResponse: {
-            FECAESolicitarResult: {
-              FeDetResp: {
-                FECAEDetResponse: {
-                  Resultado: "R",
-                  Observaciones: {
-                    Obs: {
-                      Code: 10_017,
-                      Msg: "Comprobante rechazado",
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
-
-    await expect(
-      createWsfeService(rejectedOptions).createNextVoucher({
-        data: createBaseVoucherInput(),
-      })
-    ).rejects.toMatchObject({
-      name: "ArcaServiceError",
-      serviceCode: "10017",
-      message: "(10017) Comprobante rechazado",
-    });
-
-    const missingCaeOptions = createBaseOptions();
-    missingCaeOptions.soap.execute
-      .mockResolvedValueOnce({
-        result: {
-          FECompUltimoAutorizadoResponse: {
-            FECompUltimoAutorizadoResult: {
-              CbteNro: 9,
-            },
-          },
-        },
-      })
-      .mockResolvedValueOnce({
-        result: {
-          FECAESolicitarResponse: {
-            FECAESolicitarResult: {
-              FeDetResp: {
-                FECAEDetResponse: {
-                  Resultado: "A",
-                },
-              },
-            },
-          },
-        },
-      });
-
-    await expect(
-      createWsfeService(missingCaeOptions).createNextVoucher({
-        data: createBaseVoucherInput(),
-      })
-    ).rejects.toMatchObject({
-      name: "ArcaServiceError",
-      message: "WSFE did not return CAE authorization data",
-    });
-  });
-
-  it("fails fast on invalid public date inputs", async () => {
+  it("fails fast on invalid public date inputs", () => {
     const options = createBaseOptions();
     const service = createWsfeService(options);
 
-    await expect(
-      service.createNextVoucher({
+    expect(() =>
+      service.issue({
+        voucherNumber: 42,
         data: createBaseVoucherInput({
           voucherDate: "05/01/2026" as never,
         }),
       })
-    ).rejects.toMatchObject({
-      name: "ArcaInputError",
-      code: "ARCA_INPUT_INVALID_DATE",
-      field: "voucherDate",
-      message:
-        "Invalid WSFE voucherDate: expected a YYYY-MM-DD or YYYYMMDD string",
-    });
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaInputError",
+        code: "ARCA_INPUT_INVALID_DATE",
+        field: "voucherDate",
+        message:
+          "Invalid WSFE voucherDate: expected a YYYY-MM-DD or YYYYMMDD string",
+      })
+    );
 
     expect(options.auth.login).not.toHaveBeenCalled();
     expect(options.soap.execute).not.toHaveBeenCalled();
   });
 
-  it("rejects non-string date values from untyped callers", async () => {
+  it("rejects non-string date values from untyped callers", () => {
     const options = createBaseOptions();
     const service = createWsfeService(options);
 
-    await expect(
-      service.createNextVoucher({
+    expect(() =>
+      service.issue({
+        voucherNumber: 42,
         data: createBaseVoucherInput({
           voucherDate: new Date(2026, 4, 1) as never,
         }),
       })
-    ).rejects.toMatchObject({
-      name: "ArcaInputError",
-      code: "ARCA_INPUT_INVALID_DATE",
-      field: "voucherDate",
-      message:
-        "Invalid WSFE voucherDate: expected a YYYY-MM-DD or YYYYMMDD string",
-    });
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaInputError",
+        code: "ARCA_INPUT_INVALID_DATE",
+        field: "voucherDate",
+        message:
+          "Invalid WSFE voucherDate: expected a YYYY-MM-DD or YYYYMMDD string",
+      })
+    );
 
     expect(options.auth.login).not.toHaveBeenCalled();
     expect(options.soap.execute).not.toHaveBeenCalled();

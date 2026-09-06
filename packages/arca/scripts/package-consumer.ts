@@ -4,6 +4,7 @@ import {
   buildFacturaB,
   buildFacturaC,
   createArcaClient,
+  type IssuePreview,
   isArcaAuthenticationError,
   type VouchersService,
   type WsfeAuthorizationOutcome,
@@ -122,7 +123,7 @@ export async function facadeConsumerContract(
   result.sent;
   switch (result.kind) {
     case "authorized":
-      await client.cancel(result.voucher);
+      await client.issueCreditNote({ for: result.voucher, all: true });
       result.voucher.cae satisfies string;
       result.voucher.amounts.vatAdjustment satisfies number;
       if (result.recoveredByMatch) {
@@ -168,49 +169,141 @@ export async function facadeConsumerContract(
   return result;
 }
 
-export async function cancelConsumerContract(
+export function previewConsumerContract(
   client: ReturnType<typeof createArcaClient>
 ) {
-  // @ts-expect-error The declared VouchersService widening requires cancel on hand-built mocks.
-  const oldMock: VouchersService = { issue: client.issue };
-  oldMock.issue satisfies VouchersService["issue"];
-  const result = await client.cancel({
+  const previewInput = {
+    issuer: "responsable_inscripto" as const,
     salesPoint: 1,
-    voucherType: 6,
-    number: 1,
+    to: { condition: "consumidor_final" as const },
+    items: [{ gross: 12_100, vat: 21 as const }],
+  };
+  // preview() is synchronous: the value is the request, never a promise.
+  const preview: IssuePreview = client.preview(previewInput, {
+    representedTaxId: "20304050607",
   });
-  switch (result.kind) {
+  const request: WsfeVoucherInput = preview.request;
+  preview.amounts.sentTotal satisfies number;
+  preview.voucherClass satisfies "A" | "B" | "C";
+  preview.voucherType satisfies number;
+  // @ts-expect-error preview() returns a value, so it has no promise members.
+  preview.then;
+  // @ts-expect-error preview() writes nothing, so it takes no idempotency key.
+  client.preview(previewInput, { idempotencyKey: "preview" });
+  // @ts-expect-error A non-RI issuer cannot provide VAT items to preview().
+  client.preview({ ...previewInput, issuer: "monotributo" });
+  // @ts-expect-error The declared VouchersService widening requires preview.
+  const mockWithoutPreview: VouchersService = {
+    issue: client.issue,
+    issueCreditNote: client.issueCreditNote,
+  };
+  mockWithoutPreview.issue satisfies VouchersService["issue"];
+  return request;
+}
+
+export async function creditNoteConsumerContract(
+  client: ReturnType<typeof createArcaClient>
+) {
+  // @ts-expect-error cancel() was removed in 0.10; use issueCreditNote().
+  client.cancel;
+  // @ts-expect-error The declared VouchersService widening requires issueCreditNote.
+  const oldMock: VouchersService = {
+    issue: client.issue,
+    preview: client.preview,
+  };
+  oldMock.issue satisfies VouchersService["issue"];
+
+  const target = { salesPoint: 1, voucherType: 6, number: 1 };
+  // @ts-expect-error A credit note needs exactly one mode: items or all: true.
+  await client.issueCreditNote({ for: target });
+  // @ts-expect-error items and all: true are mutually exclusive.
+  await client.issueCreditNote({
+    for: target,
+    items: [{ amount: 100 }],
+    all: true,
+  });
+  // @ts-expect-error all accepts only the literal true.
+  await client.issueCreditNote({ for: target, all: false });
+  await client.issueCreditNote({
+    for: target,
+    all: true,
+    // @ts-expect-error The receiver comes from the original, never the caller.
+    to: { condition: "exento", cuit: "20123456789" },
+  });
+  await client.issueCreditNote({
+    for: target,
+    all: true,
+    // @ts-expect-error The currency comes from the original, never the caller.
+    currency: "USD",
+  });
+  await client.issueCreditNote({
+    for: target,
+    all: true,
+    // @ts-expect-error There is no associatedPeriod; use wsfe.issue() for one.
+    associatedPeriod: { from: "20260901", to: "20260930" },
+  });
+  await client.issueCreditNote({
+    for: target,
+    // @ts-expect-error One note cannot mix amount items with VAT items.
+    items: [{ amount: 100 }, { gross: 121, vat: 21 }],
+  });
+  // The class follows the original, so an item shape that contradicts it is a
+  // runtime ArcaInputError naming the class, not a type error.
+
+  const full = await client.issueCreditNote({
+    for: target,
+    all: true,
+    date: "20260905",
+  });
+  switch (full.kind) {
     case "authorized":
-      result.voucher.cae satisfies string;
-      if (result.recoveredByMatch) {
-        result.lookup.number satisfies number;
+      full.voucher.cae satisfies string;
+      full.voucher.voucherType satisfies number;
+      if (full.recoveredByMatch) {
+        full.lookup.number satisfies number;
       } else {
-        result.authorization.cae satisfies string;
+        full.authorization.cae satisfies string;
       }
       // @ts-expect-error Exact input remains opt-in.
-      result.sent;
+      full.sent;
       break;
     case "rejected":
-      result.issues satisfies { message: string }[];
+      full.issues satisfies { message: string }[];
       break;
     case "conflict":
-      result.found.number satisfies number;
+      full.found.number satisfies number;
       break;
     case "indeterminate":
-      result.lookup.kind satisfies string;
+      full.lookup.kind satisfies string;
       break;
     default:
-      result satisfies never;
+      full satisfies never;
   }
-  const included = await client.cancel(
-    { salesPoint: 1, voucherType: 6, number: 1 },
+
+  const partial = await client.issueCreditNote(
     {
-      idempotencyKey: "cancel-sale",
-      date: "20260905",
-      include: { exactInput: true, raw: true },
-    }
+      for: target,
+      salesPoint: 1,
+      items: [{ gross: 6050, vat: 21 }],
+      total: 6050,
+    },
+    { idempotencyKey: "nc:1", include: { exactInput: true, raw: true } }
   );
-  if (included.kind === "authorized") {
-    included.sent satisfies WsfeVoucherInput;
+  switch (partial.kind) {
+    case "authorized":
+      partial.sent satisfies WsfeVoucherInput;
+      partial.voucher.amounts.sentTotal satisfies number;
+      break;
+    case "rejected":
+      partial.attempted.number satisfies number;
+      break;
+    case "conflict":
+      partial.reason satisfies string;
+      break;
+    case "indeterminate":
+      partial.attempt.reason satisfies string;
+      break;
+    default:
+      partial satisfies never;
   }
 }

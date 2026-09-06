@@ -45,7 +45,7 @@ describe("WSFE amount core", () => {
   it("reconciles generated mixed item sets with the unchanged exact validator", () => {
     for (const items of generatedSets()) {
       const { data, amounts } = calculateWsfeAmounts({
-        issuer: "responsable_inscripto",
+        voucherClass: "B",
         items,
       });
       expect(() =>
@@ -65,7 +65,7 @@ describe("WSFE amount core", () => {
           continue;
         }
         const adjusted = calculateWsfeAmounts({
-          issuer: "responsable_inscripto",
+          voucherClass: "B",
           items,
           total: amounts.computedTotal + adjustment,
         });
@@ -88,7 +88,7 @@ describe("WSFE amount core", () => {
       ].filter((value) => value >= 0)) {
         expect(() =>
           calculateWsfeAmounts({
-            issuer: "responsable_inscripto",
+            voucherClass: "B",
             items,
             total,
           })
@@ -107,7 +107,7 @@ describe("WSFE amount core", () => {
     for (const vat of SUPPORTED_VAT_RATES) {
       for (let value = 1; value <= 300; value++) {
         const gross = calculateWsfeAmounts({
-          issuer: "responsable_inscripto",
+          voucherClass: "B",
           items: [
             { gross: value, vat },
             { gross: value + 1, vat },
@@ -117,7 +117,7 @@ describe("WSFE amount core", () => {
           value * 2 + 1
         );
         const net = calculateWsfeAmounts({
-          issuer: "responsable_inscripto",
+          voucherClass: "B",
           items: [
             { net: value, vat },
             { net: value + 1, vat },
@@ -131,7 +131,7 @@ describe("WSFE amount core", () => {
   it("rounds Half Even after grouping, including mixed input and gross ties", () => {
     expect(
       calculateWsfeAmounts({
-        issuer: "responsable_inscripto",
+        voucherClass: "B",
         items: [
           { net: 25, vat: 21 },
           { net: 25, vat: 21 },
@@ -140,13 +140,13 @@ describe("WSFE amount core", () => {
     ).toBe(60);
     expect(
       calculateWsfeAmounts({
-        issuer: "responsable_inscripto",
+        voucherClass: "B",
         items: [{ net: 150, vat: 21 }],
       }).amounts.computedTotal
     ).toBe(182);
     // 2.46 / 1.025 = 2.40; 0.21 / 1.05 = 0.20.
     const mixed = calculateWsfeAmounts({
-      issuer: "responsable_inscripto",
+      voucherClass: "B",
       items: [
         { net: 50, vat: 21 },
         { gross: 121, vat: 21 },
@@ -162,7 +162,7 @@ describe("WSFE amount core", () => {
     // 20.50 / 1.025 = 20.00; ties use the even minor unit.
     expect(
       calculateWsfeAmounts({
-        issuer: "responsable_inscripto",
+        voucherClass: "B",
         items: [{ gross: 2050, vat: 2.5 }],
       }).data.netAmount
     ).toBe(20);
@@ -171,7 +171,7 @@ describe("WSFE amount core", () => {
   it("distinguishes zero-rated, exempt and untaxed amounts and omits zero bases", () => {
     expect(
       calculateWsfeAmounts({
-        issuer: "responsable_inscripto",
+        voucherClass: "B",
         items: [
           { net: 100, vat: 0 },
           { gross: 200, vat: "exempt" },
@@ -190,7 +190,7 @@ describe("WSFE amount core", () => {
     });
     expect(() =>
       calculateWsfeAmounts({
-        issuer: "responsable_inscripto",
+        voucherClass: "B",
         items: [{ net: 1, vat: 0 }],
         total: 0,
       })
@@ -201,32 +201,51 @@ describe("WSFE amount core", () => {
 
   it("requires exact totals for C, including generated amounts and zero", () => {
     for (let amount = 0; amount < 10_000; amount += 37) {
-      for (const issuer of ["monotributo", "exento", "no_alcanzado"] as const) {
-        const result = calculateWsfeAmounts({
-          issuer,
-          items: [{ amount }, { amount }],
-          total: amount * 2,
-        });
-        expect(result.amounts.computedTotal).toBe(amount * 2);
-        expect(result.data).not.toHaveProperty("vatRates");
-        expect(() =>
-          normalizeWsfeVoucherInput({
-            ...base,
-            ...result.data,
-            voucherType: 11,
-          })
-        ).not.toThrow();
-        expect(() =>
-          calculateWsfeAmounts({
-            issuer,
-            items: [{ amount }],
-            total: amount + 1,
-          })
-        ).toThrowError(
-          expect.objectContaining({ code: "ARCA_INPUT_AMOUNT_MISMATCH" })
-        );
-      }
+      const result = calculateWsfeAmounts({
+        voucherClass: "C",
+        items: [{ amount }, { amount }],
+        total: amount * 2,
+      });
+      expect(result.amounts.computedTotal).toBe(amount * 2);
+      expect(result.data).not.toHaveProperty("vatRates");
+      expect(() =>
+        normalizeWsfeVoucherInput({
+          ...base,
+          ...result.data,
+          voucherType: 11,
+        })
+      ).not.toThrow();
+      expect(() =>
+        calculateWsfeAmounts({
+          voucherClass: "C",
+          items: [{ amount }],
+          total: amount + 1,
+        })
+      ).toThrowError(
+        expect.objectContaining({ code: "ARCA_INPUT_AMOUNT_MISMATCH" })
+      );
     }
+  });
+
+  it("treats classes A and B alike and rejects an unknown class", () => {
+    const items: VatItem[] = [
+      { net: 100, vat: 21 },
+      { gross: 242, vat: 10.5 },
+    ];
+    expect(calculateWsfeAmounts({ voucherClass: "A", items })).toEqual(
+      calculateWsfeAmounts({ voucherClass: "B", items })
+    );
+    expect(() =>
+      calculateWsfeAmounts({
+        voucherClass: "D" as unknown as "A",
+        items,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ARCA_INPUT_INVALID_VALUE",
+        field: "voucherClass",
+      })
+    );
   });
 
   it.each([
@@ -239,7 +258,7 @@ describe("WSFE amount core", () => {
   ])("rejects invalid minor units %s", (gross) => {
     expect(() =>
       calculateWsfeAmounts({
-        issuer: "responsable_inscripto",
+        voucherClass: "B",
         items: [{ gross, vat: 21 }],
       })
     ).toThrowError(
@@ -260,7 +279,7 @@ describe("WSFE amount core", () => {
     ]) {
       expect(() =>
         calculateWsfeAmounts({
-          issuer: "responsable_inscripto",
+          voucherClass: "B",
           items: [item] as VatItem[],
         })
       ).toThrowError(
@@ -273,7 +292,7 @@ describe("WSFE amount core", () => {
     ]) {
       expect(() =>
         calculateWsfeAmounts({
-          issuer: "monotributo",
+          voucherClass: "C",
           items: [item] as AmountItem[],
         })
       ).toThrowError(
@@ -285,7 +304,7 @@ describe("WSFE amount core", () => {
     }
     expect(() =>
       calculateWsfeAmounts({
-        issuer: "monotributo",
+        voucherClass: "C",
         items: [{ amount: 999_999_999_999_999 }, { amount: 1 }],
       })
     ).toThrowError(

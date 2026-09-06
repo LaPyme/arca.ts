@@ -59,39 +59,102 @@ also checked as part of the input identity. A key without a store throws before
 provider I/O. Different keys identify different business operations; a key does
 not reserve the entire point-of-sale sequence against other writers.
 
-## Production smoke test and cancellation
+### Check before you send
 
-After enabling ARCA access and selecting a production point of sale, this emits
-an ARS 1 invoice and a full associated credit note. **Both documents are real
-and remain in ARCA's records.** The note is a separate operation; a failure
-leaves the invoice outstanding. Match `issuer` to your actual tax condition.
+`preview()` derives exactly what `issue()` would send, with no I/O at all: no
+store, no WSAA, no SOAP and no next-number read. It throws the same input
+errors `issue()` throws before its first call, so an input that previews
+cleanly raises no new local error at issuance.
 
 ```ts
-const arca = createArcaClient({ environment: "production" });
-const factura = await arca.issue({
-  issuer: "monotributo",
+const input = {
+  issuer: "monotributo" as const,
   salesPoint: 3,
-  to: { condition: "consumidor_final" },
-  items: [{ amount: 100 }], // ARS 1.00
-});
-if (factura.kind === "authorized") {
-  const nota = await arca.cancel(factura.voucher);
-  console.log(nota); // Handle every outcome, including a failed credit note.
+  to: { condition: "consumidor_final" as const },
+  items: [{ amount: 150_000 }],
+};
+
+const previsualizacion = arca.preview(input);
+if (previsualizacion.amounts.sentTotal !== venta.totalEnCentavos) {
+  throw new Error("The derived invoice does not match the sale total.");
 }
+const factura = await arca.issue(input, { idempotencyKey: venta.id });
 ```
 
-`cancel({ salesPoint, voucherType, number }, options)` looks up the original,
-then mirrors its full amount into credit note A, B or C (types 3, 8, 13).
-It preserves the receiver, currency, exchange rate, VAT rates and service dates.
-The note date defaults to today in Buenos Aires; use `options.date` to override.
-The payment due date cannot precede the note date. `idempotencyKey` and `include`
-work exactly as for `issue()`; give cancellation its own stable key, such as
-`cancel:${venta.id}`. Replaying that key consults only the reserved note.
+`preview()` is synchronous and returns the derived `voucherClass`,
+`voucherType`, the same `amounts` an authorized outcome reports, and `request`,
+the exact `WsfeVoucherInput` that `issue()` would send. The voucher number is
+absent because it is only known when the number is reserved at issuance.
+Previewing a credit note needs the original and is not offered.
 
-Only authorized invoice types 1, 6 and 11 in ARS or USD are supported.
-Originals with tributes, optional fields, buyers, activities or associated
-periods require the exact API. Partial notes, debit notes and FCE also require
-exact control. Missing original evidence is an error, never guessed.
+## Credit notes
+
+ARCA has no cancellation. A correction is a credit note, and both modes of
+`issueCreditNote()` write a real fiscal document that stays in ARCA's records.
+
+A credit note names the invoice it corrects. The SDK does not offer associated
+periods; use `wsfe.issue()` if you need one.
+
+The common case is partial: a refund or a price correction that credits chosen
+lines rather than the whole invoice.
+
+```ts
+const nota = await arca.issueCreditNote(
+  {
+    for: { salesPoint: 3, voucherType: 11, number: 41 },
+    items: [{ amount: 50_000 }], // ARS 500,00 of an ARS 1.500,00 invoice.
+  },
+  { idempotencyKey: `nc:${devolucion.id}` },
+);
+```
+
+`all: true` credits the whole original instead, mirroring its amounts and VAT
+rates line by line:
+
+```ts
+const notaTotal = await arca.issueCreditNote(
+  { for: { salesPoint: 3, voucherType: 11, number: 41 }, all: true },
+  { idempotencyKey: `nc-total:${venta.id}` },
+);
+```
+
+The mode is explicit and required: an input with neither `items` nor
+`all: true`, or with both, is rejected before any I/O, so a forgotten field
+cannot credit the whole invoice.
+
+From the original the SDK takes the class and therefore the note type
+(1 → 3, 6 → 8, 11 → 13), the receiver document type, number and VAT condition,
+the currency and exchange rate, the concept and, for concepts 2 and 3, the
+service dates with the due date raised to the note date. The caller provides
+`for`, the mode (`items`, with an optional `total`, or `all: true`) and, at
+most, the note's own `salesPoint`, which defaults to the original's, and
+`date`, which defaults to today in Buenos Aires. There is no `issuer`, `to` or
+`currency` field: a note to a different receiver or in a different currency is
+a different document and belongs to the exact layer.
+
+Item shapes follow the original's class. A class C note accepts `{ amount }`
+items; class A and B notes accept `{ gross | net, vat }` items with the same
+rates and reconciliation as `issue()`. The class is evidence from the original,
+so a shape that contradicts it is rejected after the single lookup of the
+original and before any write.
+
+The note may not exceed the original's total. The SDK does not track earlier
+notes against an original; preventing several notes from adding up beyond the
+invoice is the application's job.
+
+Only authorized invoices of type 1, 6 or 11 in ARS or USD can be corrected.
+Originals with tributes, optional fields, buyers, activities or an associated
+period, debit-note targets, and FCE all require the exact API.
+
+`idempotencyKey` and `include` work exactly as for `issue()`; give the note its
+own stable key, such as `nc:${devolucion.id}`. A keyed replay consults only the
+reserved note and reports `amounts` from the stored request, so on that path
+`computedTotal` equals `sentTotal` and `vatAdjustment` is `0`.
+
+A production smoke test is an ARS 1 invoice followed by a full note. **Both
+documents are real and remain in ARCA's records.** The note is a separate
+operation; a failure leaves the invoice outstanding. Match `issuer` to your
+actual tax condition.
 
 ## Stores
 
@@ -222,7 +285,8 @@ A first keyed call reserves that number before writing. A keyed replay looks
 up the reservation: only `not_found` allows one authorization of the stored
 number. A found voucher is never resubmitted. Indeterminate writes and keyed
 10016 rejections can add one lookup; a 10016 without a complete match remains
-rejected. Cancel adds the original lookup only when creating a new reservation.
+rejected. `issueCreditNote()` adds the original's lookup only when creating a new
+reservation.
 
 | Outcome | Meaning and caller action |
 | --- | --- |
@@ -338,7 +402,8 @@ WSMTXCA remains supported and exported, but this package currently puts most edi
 
 `client.issue()` derives the WSFE request, reserves the number and recovers
 after a crash for you. When you need something it does not derive (tributes,
-partial notes, FCE, an associated period) or your application owns the
+FCE, an associated period, a note in another currency or to another receiver)
+or your application owns the
 numbering, use the exact layer: `client.wsfe.issue(...)` sends one
 FECAESolicitar for a caller-owned, durably reserved voucher number and tells
 you whether that exact attempt was authorized, rejected, or left
@@ -375,12 +440,6 @@ Authenticated read, catalog, and lookup operations may repeat once with a
 forced credential refresh after an explicit typed authentication rejection.
 Passing `forceRefresh: true` disables any further authentication recovery
 attempt.
-
-The deprecated `authorizeVoucher(...)` methods throw instead of returning
-evidence, and the deprecated WSFE `createNextVoucher(...)` reads the next
-number and authorizes it in one non-idempotent call. Both remain for one
-release; applications use `client.issue()` or reserve a number and call
-`wsfe.issue()`.
 
 Exact lookup absence is operation-specific:
 
@@ -462,7 +521,9 @@ remain decimal major-unit values and its `currencyId` remains an ARCA ID.
 ## Examples
 
 - [Keyed invoice](./examples/issue-invoice.ts)
-- [Full credit note](./examples/anular-factura.ts)
+- [Preview before issuing](./examples/preview.ts)
+- [Partial credit note](./examples/nota-de-credito-parcial.ts)
+- [Full credit note](./examples/nota-de-credito-total.ts)
 
 Examples live in [examples/](./examples) and are intentionally complete, hardcoded, and readable so they can be adapted quickly by a developer or a coding agent.
 Issuance examples use deterministic dates for compilation; replace them with an

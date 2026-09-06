@@ -14,7 +14,7 @@ export type ArcaStore = {
 
 export type ArcaAttemptRecord = {
   v: 1;
-  operation: "issue" | "cancel";
+  operation: "issue" | "creditNote";
   representedTaxId?: string;
   salesPoint: number;
   voucherType: number;

@@ -1,4 +1,4 @@
-import { ARCA_VAT_RATES } from "../constants";
+import { ARCA_VAT_RATES, type VoucherClass } from "../constants";
 import { ArcaInputError } from "../errors";
 import {
   arcaMinorUnitsToNumber,
@@ -23,12 +23,12 @@ export type IssueAmounts = {
   sentTotal: number;
   vatAdjustment: number;
 };
-type AmountsInput =
-  | { issuer: "responsable_inscripto"; items: readonly VatItem[] }
-  | {
-      issuer: "monotributo" | "exento" | "no_alcanzado";
-      items: readonly AmountItem[];
-    };
+/** The class, not the issuer, fixes the accepted item shape and the arithmetic. */
+export type WsfeAmountsInput = {
+  voucherClass: VoucherClass;
+  items: readonly (VatItem | AmountItem)[];
+  total?: number;
+};
 type ExactAmounts = Pick<
   WsfeVoucherInput,
   | "totalAmount"
@@ -49,18 +49,20 @@ const RATES: Record<SupportedVatRate, { id: number; basisPoints: bigint }> = {
   27: { id: ARCA_VAT_RATES.IVA_27, basisPoints: 2700n },
 };
 
-/** Pure integer money core. Amount fields are exact-API major units. */
-export function calculateWsfeAmounts(
-  input: AmountsInput & { total?: number }
-): { data: ExactAmounts; amounts: IssueAmounts } {
+/**
+ * Pure integer money core. Amount fields are exact-API major units.
+ * Invoices and credit notes share it: both resolve a class first.
+ */
+export function calculateWsfeAmounts(input: WsfeAmountsInput): {
+  data: ExactAmounts;
+  amounts: IssueAmounts;
+} {
   if (!Array.isArray(input.items) || input.items.length === 0) {
     invalidItem("items", "a non-empty array of items");
   }
-  const isVat = input.issuer === "responsable_inscripto";
-  if (
-    !(isVat || ["monotributo", "exento", "no_alcanzado"].includes(input.issuer))
-  ) {
-    invalidItem("issuer", "a supported issuer condition");
+  const isVat = input.voucherClass === "A" || input.voucherClass === "B";
+  if (!(isVat || input.voucherClass === "C")) {
+    invalidItem("voucherClass", "A, B or C");
   }
   const totals = collectItems(input.items, isVat);
   let net = totals.net;
@@ -167,7 +169,7 @@ function collectItems(
 
 function classCAmount(item: VatItem | AmountItem, path: string): bigint {
   if ("vat" in item || "net" in item || "gross" in item) {
-    invalidItem("items", "amount items for a non-RI issuer");
+    invalidItem("items", "amount items for a class C voucher");
   }
   return assertArcaMinorUnits(item.amount as number, `${path}.amount`);
 }
@@ -176,7 +178,7 @@ function vatItemAmount(item: VatItem | AmountItem, path: string) {
   if ("amount" in item || "net" in item === "gross" in item) {
     invalidItem(
       "items",
-      "exactly one of net or gross, and vat, for an RI issuer"
+      "exactly one of net or gross, and vat, for a class A or B voucher"
     );
   }
   const field: "net" | "gross" = "net" in item ? "net" : "gross";
