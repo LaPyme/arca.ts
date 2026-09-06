@@ -61,6 +61,7 @@ export type {
   IssuedVoucher,
   IssueOptions,
   IssueOutcome,
+  IssuePreview,
 } from "./services/vouchers-types";
 export type {
   CreateWsfeServiceOptions,

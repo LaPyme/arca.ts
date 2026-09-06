@@ -120,6 +120,7 @@ describe("createArcaClient", () => {
         retryDelay: config.retryDelay,
       },
       issue: expect.any(Function),
+      preview: expect.any(Function),
       cancel: expect.any(Function),
       wsfe,
       wsmtxca,

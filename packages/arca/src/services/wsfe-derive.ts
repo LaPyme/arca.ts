@@ -84,26 +84,15 @@ export function deriveWsfeInvoice(
     ],
     "input"
   );
-  if (
-    typeof input.issuer !== "string" ||
-    !Object.hasOwn(ARCA_ISSUER_CONDITION_IDS, input.issuer)
-  ) {
-    invalid(
-      "issuer",
-      "responsable_inscripto, monotributo, exento, or no_alcanzado"
-    );
-  }
-  if (
-    !Number.isSafeInteger(input.salesPoint) ||
-    input.salesPoint < 1 ||
-    input.salesPoint > 99_999
-  ) {
-    invalid("salesPoint", "an integer from 1 through 99999");
-  }
+  assertIssuerCondition(input.issuer);
+  assertSalesPoint(input.salesPoint);
   const receiver = deriveReceiver(input.to);
-  const voucherClass =
-    ARCA_INVOICE_CLASS_BY_ISSUER[input.issuer][input.to.condition];
-  const { data: amountsData, amounts } = calculateWsfeAmounts(input);
+  const voucherClass = resolveInvoiceClass(input.issuer, input.to.condition);
+  const { data: amountsData, amounts } = calculateWsfeAmounts({
+    voucherClass,
+    items: input.items,
+    total: input.total,
+  });
   const currency = deriveCurrency(input);
   if (
     input.to.condition === "consumidor_final" &&
@@ -150,6 +139,36 @@ export function deriveWsfeInvoice(
     );
   }
   return { data, voucherClass, amounts };
+}
+
+function assertIssuerCondition(issuer: IssueInput["issuer"]) {
+  if (
+    typeof issuer !== "string" ||
+    !Object.hasOwn(ARCA_ISSUER_CONDITION_IDS, issuer)
+  ) {
+    invalid(
+      "issuer",
+      "responsable_inscripto, monotributo, exento, or no_alcanzado"
+    );
+  }
+}
+
+function assertSalesPoint(salesPoint: number) {
+  if (
+    !Number.isSafeInteger(salesPoint) ||
+    salesPoint < 1 ||
+    salesPoint > 99_999
+  ) {
+    invalid("salesPoint", "an integer from 1 through 99999");
+  }
+}
+
+/** Class resolution: the issuer's condition and the receiver's condition fix it. */
+function resolveInvoiceClass(
+  issuer: IssueInput["issuer"],
+  condition: ReceiverCondition
+): VoucherClass {
+  return ARCA_INVOICE_CLASS_BY_ISSUER[issuer][condition];
 }
 
 function deriveReceiver(to: Receiver) {

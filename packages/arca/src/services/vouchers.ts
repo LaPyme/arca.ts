@@ -18,6 +18,7 @@ import type {
   IssuedVoucher,
   IssueOptions,
   IssueOutcome,
+  IssuePreview,
 } from "./vouchers-types";
 import {
   normalizeWsfeDateInput,
@@ -56,7 +57,17 @@ export type VouchersService = {
     input: IssueInput,
     options?: O
   ): Promise<IssueOutcome<O>>;
+  /**
+   * Derives what issue() would send for the same input, with no I/O at all:
+   * no store, no WSAA, no SOAP and no next-number read.
+   *
+   * It throws every input error issue() throws before its first call, so a
+   * caller that previews and then issues sees no new local error.
+   */
+  preview(input: IssueInput, options?: PreviewOptions): IssuePreview;
 };
+
+type PreviewOptions = { representedTaxId?: number | string };
 
 type IssueWsfeService = Pick<
   WsfeService,
@@ -96,6 +107,32 @@ export function createVouchersService(
       // issueInvoice conditionally adds the fields specified by O at runtime.
       return result as IssueOutcome<O>;
     },
+    preview: (input: IssueInput, options?: PreviewOptions): IssuePreview =>
+      previewInvoice(input, options === undefined ? {} : options),
+  };
+}
+
+/** Pure: the caller inspects the request and amounts before committing. */
+function previewInvoice(
+  input: IssueInput,
+  options: PreviewOptions
+): IssuePreview {
+  assertIssueObject(options, "options");
+  assertIssueKeys(options, ["representedTaxId"], "options");
+  if (options.representedTaxId !== undefined) {
+    issueDocumentNumber(
+      options.representedTaxId,
+      "options.representedTaxId",
+      11,
+      11
+    );
+  }
+  const { data, voucherClass, amounts } = deriveWsfeInvoice(input);
+  return {
+    voucherClass,
+    voucherType: data.voucherType,
+    amounts,
+    request: data,
   };
 }
 

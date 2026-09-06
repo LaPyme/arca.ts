@@ -4,6 +4,7 @@ import {
   buildFacturaB,
   buildFacturaC,
   createArcaClient,
+  type IssuePreview,
   isArcaAuthenticationError,
   type VouchersService,
   type WsfeAuthorizationOutcome,
@@ -166,6 +167,38 @@ export async function facadeConsumerContract(
     }
   }
   return result;
+}
+
+export function previewConsumerContract(
+  client: ReturnType<typeof createArcaClient>
+) {
+  const previewInput = {
+    issuer: "responsable_inscripto" as const,
+    salesPoint: 1,
+    to: { condition: "consumidor_final" as const },
+    items: [{ gross: 12_100, vat: 21 as const }],
+  };
+  // preview() is synchronous: the value is the request, never a promise.
+  const preview: IssuePreview = client.preview(previewInput, {
+    representedTaxId: "20304050607",
+  });
+  const request: WsfeVoucherInput = preview.request;
+  preview.amounts.sentTotal satisfies number;
+  preview.voucherClass satisfies "A" | "B" | "C";
+  preview.voucherType satisfies number;
+  // @ts-expect-error preview() returns a value, so it has no promise members.
+  preview.then;
+  // @ts-expect-error preview() writes nothing, so it takes no idempotency key.
+  client.preview(previewInput, { idempotencyKey: "preview" });
+  // @ts-expect-error A non-RI issuer cannot provide VAT items to preview().
+  client.preview({ ...previewInput, issuer: "monotributo" });
+  // @ts-expect-error The declared VouchersService widening requires preview.
+  const mockWithoutPreview: VouchersService = {
+    cancel: client.cancel,
+    issue: client.issue,
+  };
+  mockWithoutPreview.issue satisfies VouchersService["issue"];
+  return request;
 }
 
 export async function cancelConsumerContract(
