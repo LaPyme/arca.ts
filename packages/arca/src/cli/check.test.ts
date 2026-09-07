@@ -509,7 +509,7 @@ describe("runCheck WSFE layer", () => {
       ✓ WSAA                   ticket obtenido
       ✗ WSFE
         El certificado no tiene la relación con Facturación Electrónica.
-        Administrador de Relaciones → Nueva Relación → WebServices → Facturación Electrónica.
+        Administrador de Relaciones → Nueva Relación → Webservices → Facturación Electrónica.
       "
     `);
   });
@@ -701,7 +701,7 @@ describe("runCheck --json", () => {
           reason: "missing_relationship",
           diagnosis:
             "El certificado no tiene la relación con Facturación Electrónica.",
-          fix: "Administrador de Relaciones → Nueva Relación → WebServices → Facturación Electrónica.",
+          fix: "Administrador de Relaciones → Nueva Relación → Webservices → Facturación Electrónica.",
         },
       ],
     });

@@ -4,24 +4,7 @@ import {
   ArcaTransportError,
   toArcaSafeErrorMetadata,
 } from "../errors";
-
-/**
- * ARCA page names and URLs, in one table so a rename is one edit here and one
- * in `docs/cli.md`. Verified against the official references linked from
- * `docs/habilitacion-arca.md`.
- */
-export const ARCA_PAGES = {
-  login: "https://auth.afip.gob.ar/contribuyente_/login.xhtml",
-  wsassService: "WSASS - Autogestión Certificados Homologación",
-  wsassNewCertificate: "Nuevo Certificado",
-  wsassAuthorizeService: "Crear autorización a servicio",
-  certificates: "Administración de Certificados Digitales",
-  certificatesAddAlias: "Agregar alias",
-  relationships: "Administrador de Relaciones",
-  relationshipsPath: "Nueva Relación → WebServices → Facturación Electrónica",
-  salesPoints: "Administración de Puntos de Venta y Domicilios",
-  salesPointsSystem: "RECE para aplicativo y Web Services",
-} as const;
+import { ARCA_PAGES } from "./arca-steps";
 
 /** Keys of {@link CLI_DIAGNOSES}. One row of the published diagnosis table. */
 export type CliDiagnosisKey =

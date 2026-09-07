@@ -74,6 +74,8 @@ export function createPainter(color: boolean): CliPainter {
 
 /** One line per fact. Colors land on the mark and nowhere else. */
 export type CliWriter = {
+  /** The painter this writer prints with, for text painted before it gets here. */
+  painter: CliPainter;
   ok(label: string, detail?: string): void;
   fail(label: string, detail?: string): void;
   warn(label: string, detail?: string): void;
@@ -121,6 +123,7 @@ export function createWriter(
   };
 
   return {
+    painter,
     ok(label, detail) {
       mark(painter.green("✓"), label, detail);
     },

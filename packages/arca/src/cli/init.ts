@@ -2,9 +2,9 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { ARCA_ENVIRONMENTS } from "../config";
 import type { ArcaEnvironment } from "../internal/types";
+import { buildArcaPlan } from "./arca-steps";
 import { createArcaCsrMaterial } from "./csr";
 import { describeTaxIdProblem, normalizeTaxId } from "./cuit";
-import { ARCA_PAGES } from "./diagnose";
 import { CLI_EXIT, type CliIo, type CliWriter } from "./output";
 import { ask, isInteractive } from "./prompt";
 
@@ -74,7 +74,13 @@ export async function runInit(
     writer.ok(".gitignore", `agregué ${ignored.join(" y ")}`);
   }
 
-  writePlan(writer, { alias, certificateName, csrName });
+  writePlan(writer, {
+    alias,
+    certificateName,
+    csrName,
+    environment,
+    taxId,
+  });
   return CLI_EXIT.ok;
 }
 
@@ -181,38 +187,32 @@ function appendToGitignore(directory: string): string[] {
 
 function writePlan(
   writer: CliWriter,
-  context: { alias: string; certificateName: string; csrName: string }
+  context: {
+    environment: ArcaEnvironment;
+    alias: string;
+    taxId: string;
+    csrName: string;
+    certificateName: string;
+  }
 ): void {
+  const plan = buildArcaPlan(context.environment, context, writer.painter);
   writer.blank();
-  writer.line("Listo. Ahora en ARCA:");
+  writer.line(plan.heading);
   writer.blank();
-  writer.line(`  1. Entrá con clave fiscal a ${ARCA_PAGES.login}`);
-  writer.line(
-    `  2. Homologación: en Mis Servicios, ${ARCA_PAGES.wsassService} → ${ARCA_PAGES.wsassNewCertificate}.`
-  );
-  writer.line(
-    `     Producción: ${ARCA_PAGES.certificates} → ${ARCA_PAGES.certificatesAddAlias}.`
-  );
-  writer.line(`     Alias: ${context.alias}`);
-  writer.line(`     Pegá el contenido de ${context.csrName}`);
-  writer.line(
-    `  3. Descargá el certificado y guardalo como ${context.certificateName}`
-  );
-  writer.line(
-    `  4. Homologación: en el mismo WSASS, ${ARCA_PAGES.wsassAuthorizeService} → wsfe.`
-  );
-  writer.line(
-    `     Producción: ${ARCA_PAGES.relationships} → ${ARCA_PAGES.relationshipsPath},`
-  );
-  writer.line(`     con el alias ${context.alias}.`);
+  for (const line of plan.lines) {
+    if (line.dim === true) {
+      writer.dim(line.text);
+    } else {
+      writer.line(line.text);
+    }
+  }
   writer.blank();
-  writer.line(
-    `Cuando ARCA te dé el certificado, guardalo acá como ${context.certificateName} y corré:`
-  );
+  writer.dim("Después:");
   writer.blank();
   writer.command("npx facturas check");
   writer.blank();
+  writer.dim("Para tu app las variables son ARCA_TAX_ID, ARCA_ENVIRONMENT,");
   writer.dim(
-    "Para tu app, las variables son ARCA_TAX_ID, ARCA_ENVIRONMENT, ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM; ver docs/inicio-rapido.md."
+    "ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM; ver docs/inicio-rapido.md."
   );
 }

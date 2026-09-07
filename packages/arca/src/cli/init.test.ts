@@ -42,23 +42,34 @@ describe("runInit", () => {
       "✓ arca-test.key          clave privada RSA 2048, permisos 0600
       ✓ arca-test.csr          CSR para ARCA, CN=facturas
 
-      Listo. Ahora en ARCA:
+      Listo. Ahora en ARCA, para homologación:
 
-        1. Entrá con clave fiscal a https://auth.afip.gob.ar/contribuyente_/login.xhtml
-        2. Homologación: en Mis Servicios, WSASS - Autogestión Certificados Homologación → Nuevo Certificado.
-           Producción: Administración de Certificados Digitales → Agregar alias.
-           Alias: facturas-test
-           Pegá el contenido de arca-test.csr
-        3. Descargá el certificado y guardalo como arca-test.crt
-        4. Homologación: en el mismo WSASS, Crear autorización a servicio → wsfe.
-           Producción: Administrador de Relaciones → Nueva Relación → WebServices → Facturación Electrónica,
-           con el alias facturas-test.
+        1. Entrá con clave fiscal en
+           https://auth.afip.gob.ar/contribuyente_/login.xhtml
+        2. Abrí "WSASS - Autogestión Certificados Homologación" en Mis Servicios.
+           Si no está, agregalo en Administrador de Relaciones → Adherir Servicio
+           → ARCA → Servicios Interactivos → WSASS, y volvé a entrar. Va con tu
+           clave fiscal de persona física, nivel 2 o superior: no es delegable.
+        3. En el menú, "Nuevo Certificado":
+             Nombre simbólico del DN:    facturas-test
+             Solicitud de certificado:   pegá arca-test.csr entero
+           Apretá "Crear DN y Obtener Certificado".
+           (cat arca-test.csr lo muestra; copiá también las líneas BEGIN y END)
+        4. El certificado sale en el cuadro de resultado, de
+           -----BEGIN CERTIFICATE----- a -----END CERTIFICATE-----.
+           Copialo entero y guardalo acá como arca-test.crt.
+        5. En el menú, "Crear autorización a servicio":
+             Nombre simbólico del DN a autorizar:   facturas-test
+             CUIT representado:                     20123456786
+             Servicio al que desea acceder:         wsfe - Facturación Electrónica
+           Apretá "Crear Autorización de Acceso".
 
-      Cuando ARCA te dé el certificado, guardalo acá como arca-test.crt y corré:
+      Después:
 
         $ npx facturas check
 
-      Para tu app, las variables son ARCA_TAX_ID, ARCA_ENVIRONMENT, ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM; ver docs/inicio-rapido.md.
+      Para tu app las variables son ARCA_TAX_ID, ARCA_ENVIRONMENT,
+      ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM; ver docs/inicio-rapido.md.
       "
     `);
   });
@@ -80,8 +91,8 @@ describe("runInit", () => {
     }
   );
 
-  it("names the files after the environment", async () => {
-    const { io, directory } = createTestIo();
+  it("names the files after the environment and prints the production steps", async () => {
+    const { io, stdout, directory } = createTestIo();
 
     await runInit(
       io,
@@ -92,6 +103,58 @@ describe("runInit", () => {
     expect(
       readFileSync(join(directory, "arca-production.key"), "utf8")
     ).toContain("PRIVATE KEY");
+    expect(stdout()).toMatchInlineSnapshot(`
+      "✓ arca-production.key    clave privada RSA 2048, permisos 0600
+      ✓ arca-production.csr    CSR para ARCA, CN=facturas
+
+      Listo. Ahora en ARCA, para producción:
+
+        1. Entrá con clave fiscal en
+           https://auth.afip.gob.ar/contribuyente_/login.xhtml
+        2. Abrí "Administración de Certificados Digitales" en Mis Servicios.
+           Si no está, agregalo en Administrador de Relaciones → Nueva Relación
+           → BUSCAR → Servicios Interactivos → Administración de Certificados
+           Digitales → Confirmar, y volvé a entrar.
+        3. Apretá "Agregar alias":
+             Alias:                 facturas-production
+             Seleccionar archivo:   arca-production.csr
+           Apretá "Agregar alias" para subirlo.
+        4. En la lista, entrá con "Ver" y usá el icono "Descargar"
+           para bajar el certificado (archivo CRT).
+           Guardalo acá como arca-production.crt.
+        5. Volvé a Administrador de Relaciones, "Nueva Relación":
+             Servicio:        BUSCAR → Webservices → Facturación Electrónica
+             Representante:   BUSCAR → el computador fiscal facturas-production
+           Apretá "Confirmar", revisá y volvé a apretar "Confirmar".
+
+      Después:
+
+        $ npx facturas check
+
+      Para tu app las variables son ARCA_TAX_ID, ARCA_ENVIRONMENT,
+      ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM; ver docs/inicio-rapido.md.
+      "
+    `);
+  });
+
+  it.each([
+    "test",
+    "production",
+  ] as const)("keeps every %s line under 80 columns and names one environment only", async (environment) => {
+    const { io, stdout, directory } = createTestIo();
+
+    await runInit(
+      io,
+      { cuit: "20123456786", env: environment, dir: directory },
+      createWriter(io.stdout, { color: false })
+    );
+
+    const output = stdout();
+    for (const line of output.split("\n")) {
+      expect(line.length, line).toBeLessThanOrEqual(80);
+    }
+    expect(output).not.toContain("Homologación:");
+    expect(output).not.toContain("Producción:");
   });
 
   it("refuses to overwrite an existing file", async () => {
@@ -179,7 +242,8 @@ describe("runInit", () => {
     );
 
     expect(stdout()).toContain("CN=mi-sistema");
-    expect(stdout()).toContain("Alias: mi-sistema-test");
+    expect(stdout()).toContain("Nombre simbólico del DN:");
+    expect(stdout()).toContain("mi-sistema-test");
   });
 
   it("exits 2 without a TTY and without --cuit", async () => {

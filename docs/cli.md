@@ -91,30 +91,94 @@ fuera del repositorio.
 Sin terminal (CI, scripts), `--cuit` y `--env` son obligatorios; si faltan, sale
 con código 2.
 
-Después imprime los pasos exactos en ARCA. Los nombres de las páginas están
+Después imprime los pasos exactos en ARCA, en una sola lista para el entorno
+que elegiste: `init` ya sabe si es homologación o producción, así que no
+imprime los dos caminos. Los nombres de página, campo y botón están
 verificados contra las referencias oficiales que lista
-[Habilitación en ARCA](./habilitacion-arca.md):
+[Habilitación en ARCA](./habilitacion-arca.md).
+
+Para `--env test`:
+
+```
+Listo. Ahora en ARCA, para homologación:
+
+  1. Entrá con clave fiscal en
+     https://auth.afip.gob.ar/contribuyente_/login.xhtml
+  2. Abrí "WSASS - Autogestión Certificados Homologación" en Mis Servicios.
+     Si no está, agregalo en Administrador de Relaciones → Adherir Servicio
+     → ARCA → Servicios Interactivos → WSASS, y volvé a entrar. Va con tu
+     clave fiscal de persona física, nivel 2 o superior: no es delegable.
+  3. En el menú, "Nuevo Certificado":
+       Nombre simbólico del DN:    facturas-test
+       Solicitud de certificado:   pegá arca-test.csr entero
+     Apretá "Crear DN y Obtener Certificado".
+     (cat arca-test.csr lo muestra; copiá también las líneas BEGIN y END)
+  4. El certificado sale en el cuadro de resultado, de
+     -----BEGIN CERTIFICATE----- a -----END CERTIFICATE-----.
+     Copialo entero y guardalo acá como arca-test.crt.
+  5. En el menú, "Crear autorización a servicio":
+       Nombre simbólico del DN a autorizar:   facturas-test
+       CUIT representado:                     20123456786
+       Servicio al que desea acceder:         wsfe - Facturación Electrónica
+     Apretá "Crear Autorización de Acceso".
+
+Después:
+
+  $ npx facturas check
+```
+
+En homologación **no hay descarga**: el certificado aparece en el cuadro de
+resultado del propio WSASS, en PEM, y se copia y se pega en un archivo de
+texto. El campo del CSR es el que el manual llama
+`Solicitud de certificado en formato PKCS10`.
+
+Para `--env production`:
+
+```
+Listo. Ahora en ARCA, para producción:
+
+  1. Entrá con clave fiscal en
+     https://auth.afip.gob.ar/contribuyente_/login.xhtml
+  2. Abrí "Administración de Certificados Digitales" en Mis Servicios.
+     Si no está, agregalo en Administrador de Relaciones → Nueva Relación
+     → BUSCAR → Servicios Interactivos → Administración de Certificados
+     Digitales → Confirmar, y volvé a entrar.
+  3. Apretá "Agregar alias":
+       Alias:                 facturas-production
+       Seleccionar archivo:   arca-production.csr
+     Apretá "Agregar alias" para subirlo.
+  4. En la lista, entrá con "Ver" y usá el icono "Descargar"
+     para bajar el certificado (archivo CRT).
+     Guardalo acá como arca-production.crt.
+  5. Volvé a Administrador de Relaciones, "Nueva Relación":
+       Servicio:        BUSCAR → Webservices → Facturación Electrónica
+       Representante:   BUSCAR → el computador fiscal facturas-production
+     Apretá "Confirmar", revisá y volvé a apretar "Confirmar".
+
+Después:
+
+  $ npx facturas check
+```
+
+En producción el alias es el **computador fiscal**: el mismo nombre aparece
+después en `Representante` al crear la relación con el servicio.
+
+Las páginas, en una tabla, para tenerlas juntas:
 
 | Dónde | Homologación | Producción |
 | --- | --- | --- |
 | Ingreso | [Clave fiscal](https://auth.afip.gob.ar/contribuyente_/login.xhtml) | igual |
-| Subir el CSR | `WSASS - Autogestión Certificados Homologación` → `Nuevo Certificado` | `Administración de Certificados Digitales` → `Agregar alias` |
-| Autorizar `wsfe` | el mismo WSASS → `Crear autorización a servicio` | `Administrador de Relaciones` → `Nueva Relación` → `WebServices` → `Facturación Electrónica` |
+| Subir el CSR | `WSASS - Autogestión Certificados Homologación` → `Nuevo Certificado` → `Crear DN y Obtener Certificado` | `Administración de Certificados Digitales` → `Agregar alias` |
+| Obtener el certificado | el cuadro de resultado del WSASS, en PEM: se copia y se pega | `Ver` → icono `Descargar` (archivo CRT) |
+| Autorizar `wsfe` | el mismo WSASS → `Crear autorización a servicio` → `Crear Autorización de Acceso` | `Administrador de Relaciones` → `Nueva Relación` → `Webservices` → `Facturación Electrónica` → el computador fiscal → `Confirmar` |
 | Punto de venta | `Administración de Puntos de Venta y Domicilios` | igual |
 
-El sistema del punto de venta depende de tu condición: `RECE para aplicativo y
-Web Services` para responsable inscripto, y las opciones
+El punto de venta no está en la salida de `init`: `check` es el que informa
+cuáles tenés habilitados. Su sistema depende de tu condición: `RECE para
+aplicativo y Web Services` para responsable inscripto, y las opciones
 `Factura Electrónica – Monotributo – Web Services` o
 `Factura Electrónica – Exento en IVA – Web Services` para monotributo y exento.
 `Comprobantes en línea` es otro sistema y no sirve para web services.
-
-Y termina donde tenés que volver:
-
-```
-Cuando ARCA te dé el certificado, guardalo acá como arca-test.crt y corré:
-
-  $ npx facturas check
-```
 
 No hay ningún `export` que copiar: `check` encuentra el par de archivos en el
 directorio. Las variables de entorno son para tu aplicación, no para el CLI, y
@@ -234,7 +298,7 @@ completa:
 | WSAA | `coe.alreadyAuthenticated` | Ya hay un ticket vigente para este certificado. | Otro proceso o máquina tiene el ticket vigente. Esperá hasta 12 horas, o corré `check` desde donde lo pediste. |
 | WSAA | `xml.generationTime.invalid`, `xml.expirationTime.*` | La hora de tu máquina difiere de la de ARCA. | Sincronizá el reloj (NTP) y volvé a probar. |
 | WSAA | falla de transporte | No se pudo conectar con `<host>`. | Revisá red, proxy o firewall; ARCA homologación suele caerse los fines de semana. |
-| WSFE | `reason: missing_relationship` | El certificado no tiene la relación con Facturación Electrónica. | `Administrador de Relaciones` → `Nueva Relación` → `WebServices` → `Facturación Electrónica`. |
+| WSFE | `reason: missing_relationship` | El certificado no tiene la relación con Facturación Electrónica. | `Administrador de Relaciones` → `Nueva Relación` → `Webservices` → `Facturación Electrónica`. |
 | WSFE | `reason: unauthorized_computer` | El certificado o computador no está autorizado. | Verificá que el alias esté asociado al servicio en este entorno. |
 | WSFE | `reason: invalid_token` | El ticket fue rechazado. | Volvé a ejecutar `check`; si persiste, revisá el reloj. |
 | WSFE | `reason: authentication_rejected` | ARCA denegó el acceso al servicio. | Revisá entorno y relación del certificado. |
@@ -265,7 +329,7 @@ las que no llegó no aparecen.
       "code": "ARCA_AUTHENTICATION_ERROR",
       "reason": "missing_relationship",
       "diagnosis": "El certificado no tiene la relación con Facturación Electrónica.",
-      "fix": "Administrador de Relaciones → Nueva Relación → WebServices → Facturación Electrónica."
+      "fix": "Administrador de Relaciones → Nueva Relación → Webservices → Facturación Electrónica."
     }
   ],
   "salesPoints": [{ "number": 3, "blocked": false, "system": "CAE" }]

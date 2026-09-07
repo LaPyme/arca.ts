@@ -4,8 +4,8 @@ import {
   ArcaSoapFaultError,
   ArcaTransportError,
 } from "../errors";
+import { ARCA_PAGES } from "./arca-steps";
 import {
-  ARCA_PAGES,
   CLI_DIAGNOSES,
   type CliDiagnosisKey,
   describeUnknownError,
