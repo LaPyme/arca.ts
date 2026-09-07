@@ -122,13 +122,64 @@ describe("run dispatch", () => {
     expect(context.stderr()).toContain("Falta el valor de");
   });
 
-  it("exits 2 for a --sales-point that is not a positive integer", async () => {
+  // `Number.parseInt` reads all four of these as a number and drops the rest,
+  // which would run the command on a sales point nobody typed.
+  it.each([
+    "tres",
+    "3foo",
+    "3.5",
+    "1e2",
+    "0",
+    "100000",
+    " 3",
+    "",
+  ])("exits 2 for the --sales-point %j and echoes it back", async (value) => {
     const context = createContext();
 
-    expect(await run(["check", "--sales-point", "tres"], context.io)).toBe(2);
-    expect(context.stderr()).toContain(
-      "--sales-point espera un número entero positivo."
+    expect(await run(["check", "--sales-point", value], context.io)).toBe(2);
+    expect(context.stderr()).toContain(`Punto de venta inválido: ${value}.`);
+    expect(context.stderr()).toContain("--sales-point 3.");
+  });
+
+  it("says a malformed sales point is not an integer", async () => {
+    const context = createContext();
+
+    expect(await run(["check", "--sales-point", "3foo"], context.io)).toBe(2);
+    expect(context.stderr()).toBe(
+      "Punto de venta inválido: 3foo. Tiene que ser un número entero, por ejemplo --sales-point 3.\n"
     );
+  });
+
+  // `--sales-point -3` never reaches the parser: node reads `-3` as the next
+  // option, so the line is malformed before the value is ever looked at.
+  it("exits 2 for a negative sales point, as a malformed line", async () => {
+    const context = createContext();
+
+    expect(await run(["check", "--sales-point", "-3"], context.io)).toBe(2);
+    expect(context.stderr()).toContain("Argumentos inválidos.");
+  });
+
+  it("says an out-of-range sales point is out of range", async () => {
+    const context = createContext();
+
+    expect(await run(["check", "--sales-point", "100000"], context.io)).toBe(2);
+    expect(context.stderr()).toBe(
+      "Punto de venta inválido: 100000. Tiene que estar entre 1 y 99999, por ejemplo --sales-point 3.\n"
+    );
+  });
+
+  it.each([
+    "1",
+    "3",
+    "0003",
+    "99999",
+  ])("accepts the sales point %j and reaches the layers", async (value) => {
+    const context = createContext();
+
+    // Layer 1 fails for lack of a CUIT: the flag itself was accepted.
+    expect(await run(["check", "--sales-point", value], context.io)).toBe(1);
+    expect(context.stderr()).toBe("");
+    expect(context.stdout()).toContain("Falta el CUIT.");
   });
 
   it("routes check and returns its exit code", async () => {

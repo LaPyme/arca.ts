@@ -2,6 +2,7 @@ import type { IssuedVoucher, IssueOutcome } from "../services/vouchers-types";
 import type { IssueInput } from "../services/wsfe-derive";
 import {
   type CheckFlags,
+  parseSalesPoint,
   resolveCheckEnvironment,
   runCheckLayers,
   writeCheckReport,
@@ -117,9 +118,8 @@ async function resolveSalesPoint(
   if (!interactive) {
     return undefined;
   }
-  const answer = await ask(io, "Punto de venta: ");
-  const parsed = Number.parseInt(answer, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+  // The same reading as `--sales-point`: a typo is a typo at the prompt too.
+  return parseSalesPoint((await ask(io, "Punto de venta: ")).trim());
 }
 
 async function resolveIssuer(

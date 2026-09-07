@@ -99,6 +99,33 @@ export type CheckFlags = {
   noCache?: boolean;
 };
 
+/**
+ * WSFE's `PtoVta` is an integer from 1 to 99999. Anything a number only starts
+ * with —`3foo`, `3.5`, `1e2`— is a typo, not a sales point: parsing it would
+ * silently work on a different one than the person typed.
+ */
+const SALES_POINT_MIN = 1;
+const SALES_POINT_MAX = 99_999;
+
+/** The sales point a string names, or `undefined` when it names none. */
+export function parseSalesPoint(value: string): number | undefined {
+  if (!/^\d+$/.test(value)) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return parsed >= SALES_POINT_MIN && parsed <= SALES_POINT_MAX
+    ? parsed
+    : undefined;
+}
+
+/** Why that string is not a sales point, in the words the CLI uses. */
+export function describeSalesPointProblem(value: string): string {
+  const reason = /^\d+$/.test(value)
+    ? `Tiene que estar entre ${SALES_POINT_MIN} y ${SALES_POINT_MAX}`
+    : "Tiene que ser un número entero";
+  return `Punto de venta inválido: ${value}. ${reason}, por ejemplo --sales-point 3.`;
+}
+
 type TicketCache = {
   sessionStore: ArcaWsaaSessionStore;
   /** True once a stored ticket was handed back instead of a fresh login. */

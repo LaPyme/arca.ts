@@ -253,7 +253,7 @@ disco: sigue leyendo variables de entorno, como explica
 | `--tax-id <cuit>` | CUIT, en vez de `ARCA_TAX_ID` |
 | `--env <test\|production>` | Entorno, en vez de `ARCA_ENVIRONMENT` |
 | `--dir <directorio>` | Dónde buscar `arca-<entorno>.crt` y `.key` (por defecto, el actual) |
-| `--sales-point <n>` | Verifica ese punto de venta en particular |
+| `--sales-point <n>` | Verifica ese punto de venta en particular. Es un entero de 1 a 99999, como el `PtoVta` de WSFE; cualquier otra cosa sale con código 2 |
 | `--no-cache` | No reusa ni guarda el ticket WSAA: un login forzado, solo en memoria |
 
 Las capas, en orden:

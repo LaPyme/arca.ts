@@ -4,7 +4,12 @@ import { type ParseArgsConfig, parseArgs } from "node:util";
 import { createArcaClient } from "../client";
 import type { ArcaClientConfig } from "../internal/types";
 import { createWsaaAuthModule } from "../wsaa";
-import { type CheckFlags, runCheck } from "./check";
+import {
+  type CheckFlags,
+  describeSalesPointProblem,
+  parseSalesPoint,
+  runCheck,
+} from "./check";
 import { type CliHelpTopic, renderHelp } from "./help";
 import { type InitFlags, runInit } from "./init";
 import { type IssueFlags, runIssue } from "./issue";
@@ -118,9 +123,11 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
     return await runInit(io, toInitFlags(values), writer);
   }
 
-  const salesPoint = parseSalesPoint(values["sales-point"]);
-  if (values["sales-point"] !== undefined && salesPoint === undefined) {
-    io.stderr.write("--sales-point espera un número entero positivo.\n");
+  const given = values["sales-point"];
+  const salesPoint =
+    typeof given === "string" ? parseSalesPoint(given) : undefined;
+  if (typeof given === "string" && salesPoint === undefined) {
+    io.stderr.write(`${describeSalesPointProblem(given)}\n`);
     return CLI_EXIT.usage;
   }
 
@@ -213,14 +220,4 @@ function text<TKey extends string>(
   return typeof value === "string"
     ? ({ [to]: value } as Record<TKey, string>)
     : {};
-}
-
-function parseSalesPoint(
-  value: string | boolean | undefined
-): number | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const parsed = Number.parseInt(value, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
