@@ -1,41 +1,75 @@
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import packageJson from "../../package.json" with { type: "json" };
-import { createDefaultIo, readCliVersion, run } from "./main";
+import { createDefaultIo, run } from "./main";
 import {
   type CliIo,
   type CliOutputStream,
   createWriter,
   shouldUseColor,
 } from "./output";
+import { readCliVersion } from "./version";
 
 describe("run --help and --version", () => {
-  it("prints the usage on stdout and exits 0", async () => {
+  it("prints the root help on stdout and exits 0", async () => {
     const context = createContext();
 
     expect(await run(["--help"], context.io)).toBe(0);
-    expect(context.stdout()).toContain(
-      "facturas — CLI de onboarding para ARCA"
-    );
-    expect(context.stdout()).toContain("npx facturas init");
+    expect(context.stdout()).toContain(`facturas ${packageJson.version}`);
+    expect(context.stdout()).toContain("npx facturas <comando> [opciones]");
     expect(context.stderr()).toBe("");
   });
 
-  it("prints the usage on stdout for a command's --help", async () => {
+  it("accepts -h as an alias", async () => {
+    const context = createContext();
+
+    expect(await run(["-h"], context.io)).toBe(0);
+    expect(context.stdout()).toContain("Comandos:");
+  });
+
+  it("prints one command's help for its --help", async () => {
     const context = createContext();
 
     expect(await run(["check", "--help"], context.io)).toBe(0);
-    expect(context.stdout()).toContain("npx facturas check");
+    expect(context.stdout()).toContain("npx facturas check [opciones]");
+    expect(context.stdout()).toContain("--sales-point <n>");
+    expect(context.stdout()).not.toContain("Comandos:");
   });
 
-  it("says what it never does", async () => {
+  it("keeps a command's --help away from ARCA and the prompt", async () => {
+    for (const command of ["init", "check", "issue"]) {
+      const context = createContext();
+      const createClient = vi.fn();
+      const createAuth = vi.fn();
+      const io = { ...context.io, createClient, createAuth } as CliIo;
+
+      expect(await run([command, "--help"], io)).toBe(0);
+      expect(context.stdout()).toContain(`npx facturas ${command} [opciones]`);
+      expect(context.stderr()).toBe("");
+      expect(createClient).not.toHaveBeenCalled();
+      expect(createAuth).not.toHaveBeenCalled();
+    }
+  });
+
+  it("moves what it stores into the command that stores it", async () => {
     const context = createContext();
 
-    await run(["--help"], context.io);
+    await run(["check", "--help"], context.io);
 
-    expect(context.stdout()).toContain("init y check nunca escriben en ARCA.");
+    expect(context.stdout()).toContain("Nunca escribe en ARCA: solo lee.");
+    expect(context.stdout()).toContain("--no-cache no lo lee ni lo escribe.");
+  });
+
+  it("says that issue writes a real voucher, in issue's help", async () => {
+    const context = createContext();
+
+    await run(["issue", "--help"], context.io);
+
+    expect(context.stdout()).toContain(
+      "Emite un comprobante real de homologación"
+    );
   });
 
   it("prints the published version", async () => {
@@ -45,15 +79,22 @@ describe("run --help and --version", () => {
     expect(context.stdout()).toBe(`${packageJson.version}\n`);
   });
 
+  it("accepts -v as an alias, even after a command", async () => {
+    const context = createContext();
+
+    expect(await run(["check", "-v"], context.io)).toBe(0);
+    expect(context.stdout()).toBe(`${packageJson.version}\n`);
+  });
+
   it("reads the version from the nearest package.json", () => {
     expect(readCliVersion()).toBe(packageJson.version);
   });
 
-  it("prints the usage on stderr and exits 2 with no command", async () => {
+  it("prints the root help on stderr and exits 2 with no command", async () => {
     const context = createContext();
 
     expect(await run([], context.io)).toBe(2);
-    expect(context.stderr()).toContain("npx facturas init");
+    expect(context.stderr()).toContain("npx facturas <comando> [opciones]");
     expect(context.stdout()).toBe("");
   });
 });
@@ -71,6 +112,7 @@ describe("run dispatch", () => {
 
     expect(await run(["check", "--nope"], context.io)).toBe(2);
     expect(context.stderr()).toContain("Opción desconocida: --nope");
+    expect(context.stderr()).toContain("npx facturas check [opciones]");
   });
 
   it("exits 2 when a flag is missing its value", async () => {
@@ -131,6 +173,21 @@ describe("color guard", () => {
   it("obeys --no-color even on a TTY", () => {
     expect(
       shouldUseColor({ write: () => undefined, isTTY: true }, {}, true)
+    ).toBe(false);
+  });
+
+  it("paints without a TTY when FORCE_COLOR asks for it", () => {
+    expect(
+      shouldUseColor({ write: () => undefined }, { FORCE_COLOR: "1" })
+    ).toBe(true);
+    expect(
+      shouldUseColor({ write: () => undefined }, { FORCE_COLOR: "0" })
+    ).toBe(false);
+    expect(
+      shouldUseColor(
+        { write: () => undefined },
+        { FORCE_COLOR: "1", NO_COLOR: "1" }
+      )
     ).toBe(false);
   });
 

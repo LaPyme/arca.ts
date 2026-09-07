@@ -14,6 +14,21 @@ npx facturas --version
 
 Necesitás Node.js 20 o superior. No instala nada aparte del paquete.
 
+## Ayuda
+
+`npx facturas --help` lista los tres comandos y las opciones globales, nada
+más. Las opciones de cada comando están en su propia ayuda, con dos o tres
+ejemplos y una nota corta de qué escribe y qué guarda:
+
+```sh
+npx facturas init --help
+npx facturas check --help
+npx facturas issue --help
+```
+
+`-h` y `-v` son alias de `--help` y `--version`. `--help` sale con código 0 y
+nunca toca la red ni pregunta nada, aunque el resto de la línea esté mal.
+
 ## Qué guarda y qué nunca hace
 
 - `init` y `check` **nunca escriben en ARCA**. Solo leen.
@@ -234,5 +249,8 @@ evidencia con el consejo de
 ## Colores
 
 El CLI usa ANSI solo cuando la salida es una terminal. Se apaga con
-`--no-color` o con la variable `NO_COLOR`. El color va únicamente en las marcas
-`✓`, `✗` y `!`.
+`--no-color` o con la variable `NO_COLOR`, y se enciende sin terminal con
+`FORCE_COLOR` (`FORCE_COLOR=0` lo apaga). En los reportes el color va
+únicamente en las marcas `✓`, `✗` y `!`; en la ayuda, en los títulos de sección
+(atenuados), los nombres de comando (negrita) y los ejemplos (cian, con el `$`
+atenuado). Sin color, el texto es exactamente el mismo menos los escapes.
