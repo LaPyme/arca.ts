@@ -1129,8 +1129,12 @@ function normalizeAndValidateWsfeAmounts(
 
 function requiresWsfeVatBaseReconciliation(voucherType: number): boolean {
   // WSFE validation 10061 exempts debit/credit notes, class C vouchers,
-  // and class A vouchers with the retention legend.
-  return ![2, 3, 7, 8, 11, 12, 13, 15, 52, 53].includes(voucherType);
+  // and class A vouchers with the retention legend. The manual enumerates the
+  // ordinary and M types only; the FCE (MiPyME) family mirrors them one to one,
+  // so its notes and its class C invoice are exempt on the same grounds.
+  return ![
+    2, 3, 7, 8, 11, 12, 13, 15, 52, 53, 202, 203, 207, 208, 211, 212, 213,
+  ].includes(voucherType);
 }
 
 function assertWsfeAmountMatch(

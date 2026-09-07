@@ -226,8 +226,9 @@ type HeaderAmounts = Pick<
  * Reviewed mode: the caller's breakdown and tributes are the header as given.
  * Nothing is recomputed, so there is never a VAT adjustment; an explicit
  * `total` is applied by the caller of this function and is not rewritten here.
+ * Invoices and notes share it, so both derive a reviewed header the same way.
  */
-function reviewedInvoiceAmounts(
+export function reviewedInvoiceAmounts(
   amounts: VoucherAmounts,
   taxes: readonly Tribute[] | undefined
 ): { data: HeaderAmounts; amounts: IssueAmounts } {

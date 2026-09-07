@@ -577,7 +577,7 @@ describe("createWsfeService", () => {
   });
 
   it.each([
-    2, 3, 7, 8, 52, 53,
+    2, 3, 7, 8, 52, 53, 202, 203, 207, 208, 211, 212, 213,
   ])("allows voucher type %s to use ARCA's exempt VAT-base reconciliation", async (voucherType) => {
     const options = createBaseOptions();
     options.soap.execute.mockResolvedValueOnce(
@@ -601,6 +601,29 @@ describe("createWsfeService", () => {
         voucherNumber: 42,
       })
     ).resolves.toMatchObject({ cae: "1" });
+  });
+
+  it.each([
+    1, 6, 51, 201, 206,
+  ])("still reconciles the VAT base for invoice type %s", (voucherType) => {
+    const options = createBaseOptions();
+
+    expect(() =>
+      createWsfeService(options).issue({
+        data: createBaseVoucherInput({
+          voucherType,
+          vatRates: [{ id: 5, baseAmount: 90, amount: 21 }],
+        }),
+        voucherNumber: 42,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        code: "ARCA_INPUT_AMOUNT_MISMATCH",
+        field: "netAmount",
+      })
+    );
+    expect(options.auth.login).not.toHaveBeenCalled();
+    expect(options.soap.execute).not.toHaveBeenCalled();
   });
 
   it("still reconciles VAT totals for voucher types exempt from VAT-base reconciliation", () => {

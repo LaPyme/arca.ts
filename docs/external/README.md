@@ -62,6 +62,20 @@ and 10197 were re-read against the same pinned file on 2026-09-06.
 | 10183 | 66 | Issuer and receiver matching is explicit for MiPyMEs notes. |
 | 10151 | 61 | An optional associated issuer CUIT must have eleven digits; MiPyMEs notes require it. |
 
+## 10061 and the FCE family (2026-09-07)
+
+Re-read against the same pinned v4.7 file. The rule text is: "La suma de los
+campos <BaseImp> en <AlicIva> debe ser igual al valor ingresado en ImpNeto.
+Esta validacion no debera ser tenida en cuenta, cuando el <CbteTipo> sea 02,
+03, 07, 08, para comprobantes tipo C (11, 12, 13, 15) y para Comprobantes tipo
+M (52, 53)". The enumeration predates the FCE (MiPyME) types and was never
+extended, so the SDK exempts 202, 203, 207 and 208 as the notes of the FCE
+family - the same document role as 02, 03, 07 and 08 - and 211, 212 and 213 as
+class C vouchers, which carry no VAT breakdown at all under 10047. The
+exemption is a local pre-flight allowance only: ARCA remains authoritative, and
+being permissive here never rejects a voucher ARCA would authorize. FCE
+invoices 201 and 206 still reconcile their bases.
+
 The extra association obligations at 10153-10160 (pages 61-63) - a mandatory
 associated voucher, a mandatory associated date, the issuer CUIT match and the
 single associated invoice - are written for MiPyMEs (FCE) notes only and do not

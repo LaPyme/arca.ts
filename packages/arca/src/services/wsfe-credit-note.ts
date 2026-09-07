@@ -1,11 +1,15 @@
 import type { VoucherClass } from "../constants";
 import { ArcaInputError } from "../errors";
-import { normalizeArcaAmountToMinorUnits } from "../internal/decimal";
+import {
+  assertArcaMinorUnits,
+  normalizeArcaAmountToMinorUnits,
+} from "../internal/decimal";
 import {
   applyFceFields,
   applyIssuanceFields,
   type IssuanceFields,
   minor,
+  tributeTotal,
   validateIssuanceFields,
   voucherFamily,
 } from "./issuance-fields";
@@ -26,6 +30,7 @@ import {
   assertIssueObject,
   buenosAiresDate,
   type IssueInput,
+  reviewedInvoiceAmounts,
 } from "./wsfe-derive";
 import type { VoucherCoordinates } from "./wsfe-identity";
 
@@ -135,28 +140,32 @@ export function deriveWsfePartialCreditNote(
   if (input.items === undefined && input.amounts === undefined) {
     invalid("items is required to credit chosen lines");
   }
+  // A requested total is minor units like every other amount. It is checked
+  // here, before the original is read, so a non-integer never reaches BigInt().
+  const requestedTotal =
+    input.total === undefined
+      ? undefined
+      : assertArcaMinorUnits(input.total, "total");
   const { note, header } = prepareCreditNote(original, input, now, kind);
   // The class comes from the original, so the item shape must match it.
-  const { data: amountsData, amounts } = calculateWsfeAmounts({
-    voucherClass: note.voucherClass,
-    items: input.amounts
-      ? note.voucherClass === "C"
-        ? [{ amount: 0 }]
-        : [{ net: 0, vat: 21 }]
-      : (input.items as NonNullable<IssueInput["items"]>),
-    total:
-      input.amounts || input.total === undefined
-        ? undefined
-        : input.total -
-          (input.taxes ?? []).reduce((sum, tax) => sum + tax.amount, 0),
-  });
+  // A reviewed breakdown takes the same path invoices take.
+  const { data: amountsData, amounts } = input.amounts
+    ? reviewedInvoiceAmounts(input.amounts, input.taxes)
+    : calculateWsfeAmounts({
+        voucherClass: note.voucherClass,
+        items: input.items as NonNullable<IssueInput["items"]>,
+        total:
+          input.total === undefined
+            ? undefined
+            : input.total - tributeTotal(input.taxes ?? []),
+      });
   const originalTotal = normalizeArcaAmountToMinorUnits(
     required(original.totalAmount, "totalAmount"),
     "totalAmount"
   );
   if (
     kind === "creditNote" &&
-    BigInt(input.total ?? amounts.sentTotal) > originalTotal
+    (requestedTotal ?? BigInt(amounts.sentTotal)) > originalTotal
   ) {
     invalid(
       "the note total is greater than the original; the SDK does not track earlier notes against an original"
@@ -180,7 +189,10 @@ export function deriveWsfePartialCreditNote(
       0n
     )
   );
-  const sentTotal = input.amounts ? (input.total ?? total) : total;
+  const sentTotal =
+    input.amounts && requestedTotal !== undefined
+      ? Number(requestedTotal)
+      : total;
   if (kind === "creditNote" && BigInt(sentTotal) > originalTotal) {
     invalid("the note total is greater than the original");
   }
