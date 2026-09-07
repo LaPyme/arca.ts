@@ -314,6 +314,7 @@ function createTestIo(options: { tty?: boolean } = {}) {
     stdin,
     env: {},
     cwd: directory,
+    cacheDir: directory,
     now: () => new Date("2026-09-06T00:00:00Z"),
     createClient: () => {
       throw new Error("init never builds a client");

@@ -107,7 +107,7 @@ export const CLI_DIAGNOSES: Record<CliDiagnosisKey, CliDiagnosis> = {
   },
   "wsaa.alreadyAuthenticated": {
     diagnosis: "Ya hay un ticket vigente para este certificado.",
-    fix: "No es un error: esperá hasta 12 horas o usá el ticket guardado.",
+    fix: "Otro proceso o máquina tiene el ticket vigente. Esperá hasta 12 horas, o corré check desde donde lo pediste.",
   },
   "wsaa.clockSkew": {
     diagnosis: "La hora de tu máquina difiere de la de ARCA.",

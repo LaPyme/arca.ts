@@ -14,17 +14,21 @@ npx facturas --version
 
 Necesitás Node.js 20 o superior. No instala nada aparte del paquete.
 
-## Qué nunca hace
+## Qué guarda y qué nunca hace
 
 - `init` y `check` **nunca escriben en ARCA**. Solo leen.
-- `check` pide el ticket WSAA en el momento, lo usa en memoria y no lo guarda:
-  no lee ni escribe ningún `store`.
-- El CLI **no guarda nada** más allá de los archivos que escribe `init`. No hay
-  archivo de configuración, ni caché, ni telemetría.
+- Lo único que el CLI guarda, aparte de los archivos de `init`, es el **ticket
+  WSAA**: en `<temporal del sistema>/facturas-cli`, con el directorio en `0700`
+  y los archivos en `0600`. ARCA rechaza un segundo login mientras hay un
+  ticket vigente (`coe.alreadyAuthenticated`, hasta 12 horas), así que sin ese
+  archivo no podrías correr `check` dos veces ni encadenar `check` con `issue`.
+  Con `--no-cache` el CLI no lee ni escribe nada: pide un ticket nuevo y lo usa
+  solo en memoria.
+- No hay archivo de configuración, ni telemetría, ni ningún otro dato guardado.
 - Nunca imprime el contenido de un PEM, un token, una firma ni un CMS. Los
   errores que no están en la tabla salen con el mensaje seguro del SDK.
-- `issue` **sí escribe**: emite un comprobante real de homologación. Se niega
-  fuera de `test`.
+- `issue` **sí escribe** en ARCA: emite un comprobante real de homologación. Se
+  niega fuera de `test`.
 
 ## `init`
 
@@ -104,6 +108,7 @@ npx facturas check
 | `--tax-id <cuit>` | CUIT, en vez de `ARCA_TAX_ID` |
 | `--env <test\|production>` | Entorno, en vez de `ARCA_ENVIRONMENT` |
 | `--sales-point <n>` | Verifica ese punto de venta en particular |
+| `--no-cache` | No reusa ni guarda el ticket WSAA: un login forzado, solo en memoria |
 
 Las capas, en orden:
 
@@ -111,13 +116,15 @@ Las capas, en orden:
 | --- | --- | --- |
 | 1 | `variables de entorno` | Descubre y valida la configuración del cliente |
 | 2 | `certificado y clave` | Parsea los dos PEM, verifica que la clave sea la del certificado y lee el vencimiento |
-| 3 | `WSAA` | Un login para el servicio `wsfe`, sin reusar ni guardar ningún ticket |
+| 3 | `WSAA` | Un login para el servicio `wsfe`. Reusa el ticket guardado si sigue vigente: la línea dice `ticket obtenido` o `ticket vigente` |
 | 4 | `WSFE` | `getServerStatus()` y después `getSalesPoints()` |
 | 5 | `puntos de venta` | La lista del paso 4, y el `--sales-point` si lo pasaste |
 
 Hay dos advertencias que no son fallas y mantienen el código de salida 0: un
 certificado que vence en menos de 30 días, y una lista de puntos de venta vacía
-en homologación, donde ARCA muchas veces no los informa aunque funcionen.
+en homologación, donde ARCA muchas veces no los informa aunque funcionen. En
+ese caso un `--sales-point` que no figura en la lista sale como
+`3 (no informado)` y `issue` puede seguir; en producción, sí es una falla.
 
 ### Diagnósticos
 
@@ -136,7 +143,7 @@ completa:
 | WSAA | `cms.cert.untrusted`, `cms.cert.invalid` | ARCA no reconoce este certificado en este entorno. | Homologación y producción tienen certificados propios; revisá `ARCA_ENVIRONMENT`. |
 | WSAA | `cms.bad`, `cms.sign.invalid` | La firma del pedido no es válida. | La clave no corresponde al certificado, o el PEM está truncado. |
 | WSAA | `coe.notAuthorized` | El certificado no está autorizado para `wsfe`. | `WSASS - Autogestión Certificados Homologación` → `Crear autorización a servicio` (homologación) / `Administrador de Relaciones` (producción). |
-| WSAA | `coe.alreadyAuthenticated` | Ya hay un ticket vigente para este certificado. | No es un error: esperá hasta 12 horas o usá el ticket guardado. Sale con ✓ y no sigue a WSFE. |
+| WSAA | `coe.alreadyAuthenticated` | Ya hay un ticket vigente para este certificado. | Otro proceso o máquina tiene el ticket vigente. Esperá hasta 12 horas, o corré `check` desde donde lo pediste. |
 | WSAA | `xml.generationTime.invalid`, `xml.expirationTime.*` | La hora de tu máquina difiere de la de ARCA. | Sincronizá el reloj (NTP) y volvé a probar. |
 | WSAA | falla de transporte | No se pudo conectar con `<host>`. | Revisá red, proxy o firewall; ARCA homologación suele caerse los fines de semana. |
 | WSFE | `reason: missing_relationship` | El certificado no tiene la relación con Facturación Electrónica. | `Administrador de Relaciones` → `Nueva Relación` → `WebServices` → `Facturación Electrónica`. |
@@ -163,7 +170,7 @@ las que no llegó no aparecen.
   "layers": [
     { "name": "env", "ok": true, "detail": "ARCA_TAX_ID, ARCA_ENVIRONMENT=test" },
     { "name": "certificate", "ok": true, "detail": "coinciden, vence 2027-09-05", "expiresAt": "2027-09-05" },
-    { "name": "wsaa", "ok": true, "detail": "ticket obtenido" },
+    { "name": "wsaa", "ok": true, "detail": "ticket vigente" },
     {
       "name": "wsfe",
       "ok": false,
@@ -203,8 +210,8 @@ Esta es la llamada que hizo el CLI. Pegala en tu aplicación:
   });
 ```
 
-Acepta los flags de `check` más `--issuer`, con las cuatro condiciones de
-emisor: `monotributo`, `responsable_inscripto`, `exento` y `no_alcanzado`. En
+Acepta los flags de `check`, incluido `--no-cache`, más `--issuer`, con las
+cuatro condiciones de emisor: `monotributo`, `responsable_inscripto`, `exento` y `no_alcanzado`. En
 una terminal pregunta el punto de venta y el emisor si no los pasaste.
 
 Emite sin `store` y sin `idempotencyKey`: es el inicio rápido en un comando. En

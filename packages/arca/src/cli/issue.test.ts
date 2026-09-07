@@ -1,13 +1,23 @@
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import forge from "node-forge";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArcaClient } from "../client";
 import { ArcaAuthenticationError } from "../errors";
 import type { ArcaAuthCredentials } from "../internal/types";
 import type { IssueOutcome } from "../services/vouchers-types";
 import { buildSmokeTestInput, formatMinorUnits, runIssue } from "./issue";
 import { type CliIo, type CliOutputStream, createWriter } from "./output";
+
+const temporary: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporary.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
 
 const PAIR = createSelfSigned();
 const TICKET: ArcaAuthCredentials = {
@@ -200,6 +210,16 @@ describe("runIssue", () => {
     `);
   });
 
+  it("issues even when homologación reports no sales points", async () => {
+    const context = createContext({ outcome: AUTHORIZED, salesPoints: [] });
+
+    expect(await run(context, { salesPoint: 3, issuer: "monotributo" })).toBe(
+      0
+    );
+    expect(context.issue).toHaveBeenCalledTimes(1);
+    expect(context.stdout()).toContain("✓ factura B 0003-00000007");
+  });
+
   it("prints the class C call for a monotributista", async () => {
     const context = createContext({ outcome: AUTHORIZED });
 
@@ -346,6 +366,7 @@ function stripCheck(printed: string): string {
 function createContext(options: {
   environment?: string;
   outcome?: IssueOutcome;
+  salesPoints?: { number: number; blocked: string; emissionType: string }[];
   salesPointsError?: unknown;
   tty?: boolean;
 }) {
@@ -399,6 +420,7 @@ function createContext(options: {
         : { ARCA_ENVIRONMENT: "test" }),
     },
     cwd: tmpdir(),
+    cacheDir: createTemporaryDirectory(),
     now: () => new Date("2026-09-06T00:00:00Z"),
     createClient: (clientOptions) => {
       context.clientOptions = clientOptions as never;
@@ -412,9 +434,11 @@ function createContext(options: {
             }),
           getSalesPoints: () =>
             options.salesPointsError === undefined
-              ? Promise.resolve([
-                  { number: 3, blocked: "N", emissionType: "CAE" },
-                ])
+              ? Promise.resolve(
+                  options.salesPoints ?? [
+                    { number: 3, blocked: "N", emissionType: "CAE" },
+                  ]
+                )
               : Promise.reject(options.salesPointsError),
         },
         issue,
@@ -438,6 +462,12 @@ async function waitFor(condition: () => boolean, attempts = 200) {
     await new Promise((resolve) => setImmediate(resolve));
   }
   throw new Error("the prompt never appeared");
+}
+
+function createTemporaryDirectory(): string {
+  const directory = mkdtempSync(join(tmpdir(), "facturas-issue-"));
+  temporary.push(directory);
+  return directory;
 }
 
 function createSelfSigned() {

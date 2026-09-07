@@ -37,6 +37,7 @@ function createIo(tty = false) {
     stdin,
     env: {},
     cwd: tmpdir(),
+    cacheDir: tmpdir(),
     now: () => new Date(),
     createClient: () => {
       throw new Error("no client");

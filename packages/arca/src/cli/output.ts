@@ -18,6 +18,8 @@ export type CliIo = {
   stdin: CliInputStream;
   env: Record<string, string | undefined>;
   cwd: string;
+  /** Where the WSAA ticket is cached between runs. Never holds anything else. */
+  cacheDir: string;
   now(): Date;
   createClient(options: ArcaClientOptions): ArcaClient;
   createAuth(config: ArcaClientConfig): WsaaAuthModule;

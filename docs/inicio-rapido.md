@@ -52,7 +52,8 @@ npx facturas check
 
 Prueba las variables, el certificado, WSAA, WSFE y los puntos de venta en ese
 orden, y nombra la capa que falla con la página de ARCA que la arregla. No
-escribe nada en ARCA. La tabla completa de diagnósticos está en
+escribe nada en ARCA; sí guarda el ticket WSAA en el directorio temporal, para
+poder repetirse. La tabla completa de diagnósticos está en
 [CLI](./cli.md#diagnósticos).
 
 ## 4. Emití la primera factura

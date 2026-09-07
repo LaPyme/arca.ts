@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ParseArgsConfig, parseArgs } from "node:util";
@@ -39,6 +40,7 @@ const COMMAND_OPTIONS: Record<Command, OptionConfig> = {
     "tax-id": { type: "string" },
     env: { type: "string" },
     "sales-point": { type: "string" },
+    "no-cache": { type: "boolean" },
   },
   issue: {
     ...GLOBAL_OPTIONS,
@@ -47,6 +49,7 @@ const COMMAND_OPTIONS: Record<Command, OptionConfig> = {
     "tax-id": { type: "string" },
     env: { type: "string" },
     "sales-point": { type: "string" },
+    "no-cache": { type: "boolean" },
     issuer: { type: "string" },
   },
 };
@@ -72,6 +75,7 @@ Opciones de check e issue:
   --tax-id <cuit>        CUIT, en lugar de ARCA_TAX_ID
   --env <test|production>  entorno, en lugar de ARCA_ENVIRONMENT
   --sales-point <n>      punto de venta a verificar o a usar
+  --no-cache             no reusa ni guarda el ticket WSAA
 
 Opciones de issue:
   --issuer <monotributo|responsable_inscripto|exento|no_alcanzado>
@@ -81,8 +85,9 @@ Opciones globales:
   --no-color             sin ANSI
   --help, --version
 
-init y check nunca escriben en ARCA. issue emite un comprobante real de
-homologación y se niega fuera de test.
+init y check nunca escriben en ARCA. Guardan el ticket WSAA en el directorio
+temporal del sistema para poder repetirse; --no-cache lo evita. issue emite un
+comprobante real de homologación y se niega fuera de test.
 `;
 
 /** Runs one CLI invocation and returns its exit code. Never calls `exit`. */
@@ -153,6 +158,7 @@ export function createDefaultIo(): CliIo {
     stdin: process.stdin,
     env: process.env,
     cwd: process.cwd(),
+    cacheDir: join(tmpdir(), "facturas-cli"),
     now: () => new Date(),
     createClient: (options) => createArcaClient(options),
     createAuth: (config: ArcaClientConfig) => createWsaaAuthModule({ config }),
@@ -218,6 +224,7 @@ function toCheckFlags(
     ...text(values, "tax-id", "taxId"),
     ...text(values, "env", "env"),
     ...(salesPoint === undefined ? {} : { salesPoint }),
+    ...(values["no-cache"] === true ? { noCache: true } : {}),
   };
 }
 

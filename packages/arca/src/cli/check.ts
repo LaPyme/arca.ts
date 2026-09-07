@@ -19,6 +19,8 @@ import type {
   ArcaWsaaSessionStore,
 } from "../internal/types";
 import type { WsfeSalesPoint } from "../services/wsfe";
+import { createFileStore } from "../store/file";
+import { createWsaaStoreAdapter } from "../wsaa/store-adapter";
 import { privateKeyMatchesCertificate, readCertificateFacts } from "./csr";
 import {
   type CliDiagnosis,
@@ -32,6 +34,8 @@ import {
 import { CLI_EXIT, type CliIo, type CliWriter } from "./output";
 
 const EXPIRY_WARNING_DAYS = 30;
+const EMPTY_IN_TEST_WARNING =
+  "en homologación ARCA suele no informarlos; probá igual con issue";
 const MILLISECONDS_PER_DAY = 86_400_000;
 
 /** The five layers, in the order ARCA breaks them. */
@@ -83,6 +87,14 @@ export type CheckFlags = {
   taxId?: string;
   env?: string;
   salesPoint?: number;
+  /** Skips the ticket cache: one forced login, kept in memory only. */
+  noCache?: boolean;
+};
+
+type TicketCache = {
+  sessionStore: ArcaWsaaSessionStore;
+  /** True once a stored ticket was handed back instead of a fresh login. */
+  wasReused(): boolean;
 };
 
 /** The report plus the client the passing layers built, for `issue` to reuse. */
@@ -133,20 +145,20 @@ export async function runCheckLayers(
     return { report };
   }
 
-  const wsaa = await checkWsaa(io, config);
+  const cache =
+    flags.noCache === true ? undefined : createTicketCache(io.cacheDir);
+  const wsaa = await checkWsaa(io, config, cache);
   layers.push(wsaa.layer);
-  if (!wsaa.layer.ok) {
-    return { report };
-  }
-  if (!wsaa.credentials) {
-    // A valid ticket exists elsewhere, so WSAA is proven and WSFE is not run.
-    report.ok = true;
+  if (!(wsaa.layer.ok && wsaa.credentials)) {
     return { report };
   }
 
+  // WSFE reuses the ticket layer 3 obtained: a second login would collide with
+  // it as coe.alreadyAuthenticated.
   const client = io.createClient({
     ...config,
-    wsaaSessionStore: createEphemeralSessionStore(wsaa.credentials),
+    wsaaSessionStore:
+      cache?.sessionStore ?? createEphemeralSessionStore(wsaa.credentials),
   });
   const wsfe = await checkWsfe(client);
   layers.push(wsfe.layer);
@@ -177,12 +189,12 @@ export function writeCheckReport(
       writer.ok(label, layer.detail);
     } else {
       writer.fail(label);
-    }
-    if (layer.diagnosis !== undefined) {
-      writer.note(layer.diagnosis);
-    }
-    if (layer.fix !== undefined) {
-      writer.note(layer.fix);
+      if (layer.diagnosis !== undefined) {
+        writer.note(layer.diagnosis);
+      }
+      if (layer.fix !== undefined) {
+        writer.note(layer.fix);
+      }
     }
     if (layer.name === "salesPoints") {
       for (const point of report.salesPoints ?? []) {
@@ -328,13 +340,24 @@ function checkCertificate(config: ArcaClientConfig, now: Date): CliLayerReport {
 
 async function checkWsaa(
   io: CliIo,
-  config: ArcaClientConfig
+  config: ArcaClientConfig,
+  cache: TicketCache | undefined
 ): Promise<{ layer: CliLayerReport; credentials?: ArcaAuthCredentials }> {
   try {
-    const auth = io.createAuth(config);
-    const credentials = await auth.login("wsfe", { forceRefresh: true });
+    const auth = io.createAuth({
+      ...config,
+      ...(cache === undefined ? {} : { wsaaSessionStore: cache.sessionStore }),
+    });
+    const credentials = await auth.login("wsfe", {
+      forceRefresh: cache === undefined,
+    });
     return {
-      layer: { name: "wsaa", ok: true, detail: "ticket obtenido" },
+      layer: {
+        name: "wsaa",
+        ok: true,
+        detail:
+          cache?.wasReused() === true ? "ticket vigente" : "ticket obtenido",
+      },
       credentials,
     };
   } catch (error) {
@@ -348,16 +371,6 @@ function toWsaaFailure(
 ): CliLayerReport {
   const fault = findSoapFault(error);
   const key = diagnoseWsaaFaultCode(fault?.faultCode);
-  if (key === "wsaa.alreadyAuthenticated") {
-    const row = diagnose(key);
-    return {
-      name: "wsaa",
-      ok: true,
-      detail: "ticket vigente",
-      diagnosis: row.diagnosis,
-      ...(row.fix === undefined ? {} : { fix: row.fix }),
-    };
-  }
   if (key !== undefined) {
     return failedLayer("wsaa", diagnose(key), fault?.code);
   }
@@ -438,6 +451,15 @@ function checkSalesPoints(
   if (requested !== undefined) {
     const found = points.find((point) => point.number === requested);
     if (!found) {
+      // Homologación often reports no points at all for ones that work.
+      if (points.length === 0 && environment === "test") {
+        return {
+          name: "salesPoints",
+          ok: true,
+          detail: `${requested} (no informado)`,
+          warning: EMPTY_IN_TEST_WARNING,
+        };
+      }
       return failedLayer(
         "salesPoints",
         diagnose("salesPoint.missing", { salesPoint: requested })
@@ -463,7 +485,7 @@ function checkSalesPoints(
       detail: "ninguno informado",
       warning:
         environment === "test"
-          ? "en homologación ARCA suele no informarlos; probá igual con issue"
+          ? EMPTY_IN_TEST_WARNING
           : "ARCA no informó ningún punto de venta",
     };
   }
@@ -472,6 +494,31 @@ function checkSalesPoints(
     name: "salesPoints",
     ok: true,
     detail: `${points.length} ${points.length === 1 ? "informado" : "informados"}`,
+  };
+}
+
+/**
+ * The WSAA ticket, kept in the system temp directory so `check` and `issue`
+ * can be run again inside the 12 hours ARCA keeps it valid. The file store
+ * creates the directory 0700 and writes 0600. Nothing else is ever stored.
+ */
+function createTicketCache(directory: string): TicketCache {
+  const store = createWsaaStoreAdapter(createFileStore(directory));
+  let reused = false;
+  const remove = store.delete?.bind(store);
+  return {
+    sessionStore: {
+      get: async (key) => {
+        const credentials = await store.get(key);
+        if (credentials) {
+          reused = true;
+        }
+        return credentials;
+      },
+      set: (key, credentials) => store.set(key, credentials),
+      ...(remove === undefined ? {} : { delete: remove }),
+    },
+    wasReused: () => reused,
   };
 }
 

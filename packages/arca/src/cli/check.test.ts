@@ -1,4 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -11,7 +17,11 @@ import {
   ArcaSoapFaultError,
   ArcaTransportError,
 } from "../errors";
-import type { ArcaAuthCredentials } from "../internal/types";
+import type {
+  ArcaAuthCredentials,
+  ArcaAuthOptions,
+  ArcaWsaaServiceId,
+} from "../internal/types";
 import type { WsfeSalesPoint } from "../services/wsfe";
 import { type CheckFlags, runCheck } from "./check";
 import { type CliIo, type CliOutputStream, createWriter } from "./output";
@@ -180,16 +190,52 @@ describe("runCheck certificate layer", () => {
 });
 
 describe("runCheck WSAA layer", () => {
-  it("never reuses a stored ticket", async () => {
-    const context = createContext({
-      env: fullEnv(),
-      salesPoints: [],
-    });
+  it("lets the SDK reuse the cached ticket instead of forcing a login", async () => {
+    const context = createContext({ env: fullEnv(), salesPoints: [] });
 
     await run(context, {});
 
-    expect(context.login).toHaveBeenCalledWith("wsfe", { forceRefresh: true });
+    expect(context.login).toHaveBeenCalledWith("wsfe", { forceRefresh: false });
     expect(context.clientOptions?.store).toBeUndefined();
+  });
+
+  it("forces one in-memory login with --no-cache", async () => {
+    const context = createContext({ env: fullEnv(), salesPoints: [] });
+
+    await run(context, { noCache: true });
+
+    expect(context.login).toHaveBeenCalledWith("wsfe", { forceRefresh: true });
+    expect(context.authOptions?.wsaaSessionStore).toBeUndefined();
+  });
+
+  it("keeps the ticket so a second run does not log in again", async () => {
+    const cacheDir = createTemporaryDirectory();
+    const first = createContext({ env: fullEnv(), salesPoints: [], cacheDir });
+
+    expect(await run(first, {})).toBe(0);
+    expect(first.stdout()).toContain(
+      "✓ WSAA                   ticket obtenido"
+    );
+
+    const second = createContext({ env: fullEnv(), salesPoints: [], cacheDir });
+    expect(await run(second, {})).toBe(0);
+    expect(second.stdout()).toContain(
+      "✓ WSAA                   ticket vigente"
+    );
+    expect(second.login).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing to the cache with --no-cache", async () => {
+    const cacheDir = createTemporaryDirectory();
+    const context = createContext({
+      env: fullEnv(),
+      salesPoints: [],
+      cacheDir,
+    });
+
+    await run(context, { noCache: true });
+
+    expect(existsSync(cacheDir) ? readdirSync(cacheDir) : []).toEqual([]);
   });
 
   it("names an unauthorized certificate", async () => {
@@ -231,7 +277,7 @@ describe("runCheck WSAA layer", () => {
     );
   });
 
-  it("treats an existing ticket as a pass and stops there", async () => {
+  it("names a ticket another machine is holding", async () => {
     const context = createContext({
       env: fullEnv(),
       loginError: new ArcaSoapFaultError("ya autenticado", {
@@ -239,14 +285,13 @@ describe("runCheck WSAA layer", () => {
       }),
     });
 
-    expect(await run(context, {})).toBe(0);
-    expect(context.stdout()).toContain(
-      "✓ WSAA                   ticket vigente"
-    );
+    expect(await run(context, {})).toBe(1);
     expect(context.stdout()).toContain(
       "Ya hay un ticket vigente para este certificado."
     );
-    expect(context.stdout()).not.toContain("WSFE");
+    expect(context.stdout()).toContain(
+      "Otro proceso o máquina tiene el ticket vigente."
+    );
   });
 
   it("falls back to the SDK's safe message for an unknown failure", async () => {
@@ -305,17 +350,29 @@ describe("runCheck WSFE layer", () => {
     expect(context.stdout()).toContain("dbServer=ERROR");
   });
 
-  it("reuses the WSAA ticket instead of logging in again", async () => {
+  it("hands WSFE the same ticket store the WSAA layer used", async () => {
     const context = createContext({ env: fullEnv(), salesPoints: [] });
 
     await run(context, {});
 
+    expect(context.clientOptions?.wsaaSessionStore).toBe(
+      context.authOptions?.wsaaSessionStore
+    );
+    expect(context.login).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands WSFE the in-memory ticket with --no-cache", async () => {
+    const context = createContext({ env: fullEnv(), salesPoints: [] });
+
+    await run(context, { noCache: true });
+
     const stored = await context.clientOptions?.wsaaSessionStore?.get({
       environment: "test",
       service: "wsfe",
-      certificateFingerprint: "any",
+      certificateFingerprint: "cualquiera",
     });
     expect(stored).toEqual(TICKET);
+    expect(context.login).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -363,6 +420,30 @@ describe("runCheck sales points layer", () => {
     expect(await run(context, { salesPoint: 9 })).toBe(1);
     expect(context.stdout()).toContain(
       "El punto de venta 9 no está habilitado para web services."
+    );
+  });
+
+  it("accepts a point homologación does not report", async () => {
+    const context = createContext({ env: fullEnv(), salesPoints: [] });
+
+    expect(await run(context, { salesPoint: 3 })).toBe(0);
+    expect(context.stdout()).toContain(
+      "✓ puntos de venta        3 (no informado)"
+    );
+    expect(context.stdout()).toContain(
+      "en homologación ARCA suele no informarlos"
+    );
+  });
+
+  it("still fails for an unlisted point in production", async () => {
+    const context = createContext({
+      env: fullEnv({ ARCA_ENVIRONMENT: "production" }),
+      salesPoints: [],
+    });
+
+    expect(await run(context, { salesPoint: 3 })).toBe(1);
+    expect(context.stdout()).toContain(
+      "El punto de venta 3 no está habilitado para web services."
     );
   });
 
@@ -502,6 +583,7 @@ function fullEnv(overrides: Record<string, string> = {}) {
 
 function createContext(options: {
   env: Record<string, string | undefined>;
+  cacheDir?: string;
   loginError?: unknown;
   serverStatus?: { appServer: string; dbServer: string; authServer: string };
   salesPoints?: WsfeSalesPoint[];
@@ -511,18 +593,25 @@ function createContext(options: {
   const out: string[] = [];
   const stdout: CliOutputStream = { write: (chunk) => out.push(chunk) };
   const stderr: CliOutputStream = { write: () => undefined };
-  const login = vi.fn(() =>
-    options.loginError === undefined
-      ? Promise.resolve(TICKET)
-      : Promise.reject(options.loginError)
+  const login = vi.fn(
+    (_service: ArcaWsaaServiceId, _authOptions?: ArcaAuthOptions) =>
+      options.loginError === undefined
+        ? Promise.resolve(TICKET)
+        : Promise.reject(options.loginError)
   );
   const context = {
     login,
     clientOptions: undefined as Record<string, never> | undefined,
+    authOptions: undefined as Record<string, never> | undefined,
     stdout: () => out.join(""),
     io: {} as CliIo,
   } as unknown as {
     login: typeof login;
+    authOptions?: {
+      wsaaSessionStore?: {
+        get(key: unknown): Promise<ArcaAuthCredentials | null>;
+      };
+    };
     clientOptions?: {
       store?: unknown;
       wsaaSessionStore?: {
@@ -539,6 +628,7 @@ function createContext(options: {
     stdin: new PassThrough(),
     env: options.env,
     cwd: tmpdir(),
+    cacheDir: options.cacheDir ?? createTemporaryDirectory(),
     now: () => NOW,
     createClient: (clientOptions) => {
       context.clientOptions = clientOptions as never;
@@ -560,7 +650,33 @@ function createContext(options: {
         issue: options.issue ?? (() => Promise.reject(new Error("no issue"))),
       } as unknown as ArcaClient;
     },
-    createAuth: () => ({ login }) as never,
+    createAuth: (authConfig) => {
+      context.authOptions = authConfig as never;
+      // Mirrors the SDK: a store is read unless the login is forced, and a
+      // fresh ticket is written back to it.
+      const store = authConfig.wsaaSessionStore;
+      const sessionKey = {
+        environment: authConfig.environment,
+        service: "wsfe",
+        certificateFingerprint: "prueba",
+      } as const;
+      return {
+        login: async (
+          service: ArcaWsaaServiceId,
+          authOptions?: ArcaAuthOptions
+        ) => {
+          if (store && authOptions?.forceRefresh !== true) {
+            const stored = await store.get(sessionKey);
+            if (stored) {
+              return stored;
+            }
+          }
+          const credentials = await login(service, authOptions);
+          await store?.set(sessionKey, credentials);
+          return credentials;
+        },
+      } as never;
+    },
   };
 
   return context;

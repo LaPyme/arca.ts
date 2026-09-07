@@ -214,6 +214,7 @@ function createContext(
     stdin: new PassThrough(),
     env,
     cwd: tmpdir(),
+    cacheDir: tmpdir(),
     now: () => new Date("2026-09-06T00:00:00Z"),
     createClient: () => {
       throw new Error("no client in these tests");
