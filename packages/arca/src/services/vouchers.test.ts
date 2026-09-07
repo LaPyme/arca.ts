@@ -91,7 +91,7 @@ function expectNoRaw(value: unknown) {
 }
 
 describe("vouchers.issue", () => {
-  it("wires the facade on the client", () => {
+  it("wires the high-level API on the client", () => {
     expect(
       createArcaClient({
         taxId: "20123456789",
@@ -388,7 +388,7 @@ describe("vouchers.issue", () => {
   });
 });
 
-describe("facade with the real exact SOAP adapter", () => {
+describe("high-level API with the real exact SOAP adapter", () => {
   function createAdapter(soap: CreateWsfeServiceOptions["soap"]) {
     return createWsfeService({
       config: {

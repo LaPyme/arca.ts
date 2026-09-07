@@ -14,13 +14,16 @@ export type ArcaStore = {
 
 export type ArcaAttemptRecord = {
   v: 1;
-  operation: "issue" | "creditNote";
+  operation: "issue" | "creditNote" | "debitNote";
+  service?: "wsfe" | "wsmtxca";
   representedTaxId?: string;
   salesPoint: number;
   voucherType: number;
   number: number;
   inputHash: string;
-  sent: WsfeVoucherInput;
+  sent: WsfeVoucherInput & {
+    details?: readonly import("../services/issuance-wsmtxca").VoucherItemDetail[];
+  };
   createdAt: string;
 };
 

@@ -126,7 +126,7 @@ describe("full credit note derivation", () => {
     ["buyers", "Compradores"],
     ["activities", "Actividades"],
     ["associatedPeriod", "PeriodoAsoc"],
-  ])("rejects unsupported %s", (field, rawField) => {
+  ])("rejects undecodable or malformed original %s", (field, rawField) => {
     expect(() =>
       deriveWsfeFullCreditNote(
         { ...invoice, raw: { [rawField]: { value: 1 } } },
@@ -138,19 +138,18 @@ describe("full credit note derivation", () => {
         { ...invoice, [field]: [{ value: 1 }] },
         full("20260905")
       )
-    ).toThrow("wsfe.issue()");
+    ).toThrow("exact service API");
     expect(() =>
       deriveWsfePartialCreditNote(
         { ...invoice, [field]: [{ value: 1 }] },
         partial([{ gross: 100, vat: 21 }])
       )
-    ).toThrow("wsfe.issue()");
+    ).toThrow("exact service API");
   });
   it("rejects missing required evidence and unsupported originals", () => {
     for (const change of [
       { result: "R" },
       { voucherType: 8 },
-      { currencyId: "060" },
       { cae: undefined },
       { receiverVatConditionId: undefined },
       { taxAmount: 1 },

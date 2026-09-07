@@ -100,7 +100,7 @@ export function calculateWsfeAmounts(input: WsfeAmountsInput): {
       ? computed
       : assertArcaMinorUnits(input.total, "total");
   const adjustment = sent - computed;
-  // 10023: the facade deliberately uses only the absolute cents-per-rate allowance.
+  // 10023: the high-level API deliberately uses only the absolute cents-per-rate allowance.
   const allowance = BigInt(vatRates.length);
   if (
     adjustment < -allowance ||

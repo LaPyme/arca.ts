@@ -214,12 +214,12 @@ export async function creditNoteConsumerContract(
   oldMock.issue satisfies VouchersService["issue"];
 
   const target = { salesPoint: 1, voucherType: 6, number: 1 };
-  // @ts-expect-error A credit note needs exactly one mode: items or all: true.
+  // @ts-expect-error A credit note needs exactly one mode: items, amounts or all: true.
   await client.issueCreditNote({ for: target });
-  // @ts-expect-error items and all: true are mutually exclusive.
   await client.issueCreditNote({
     for: target,
     items: [{ amount: 100 }],
+    // @ts-expect-error items and all: true are mutually exclusive.
     all: true,
   });
   // @ts-expect-error all accepts only the literal true.
@@ -239,7 +239,7 @@ export async function creditNoteConsumerContract(
   await client.issueCreditNote({
     for: target,
     all: true,
-    // @ts-expect-error There is no associatedPeriod; use wsfe.issue() for one.
+    // @ts-expect-error Linked notes and period notes are mutually exclusive.
     associatedPeriod: { from: "20260901", to: "20260930" },
   });
   await client.issueCreditNote({
@@ -305,5 +305,64 @@ export async function creditNoteConsumerContract(
       break;
     default:
       partial satisfies never;
+  }
+}
+
+export async function completeIssuanceConsumerContract(
+  client: ReturnType<typeof createArcaClient>
+) {
+  const input = {
+    issuer: "responsable_inscripto" as const,
+    salesPoint: 1,
+    to: { condition: 1, cuit: "20123456789" },
+    amounts: {
+      net: 10_000,
+      vat: 2100,
+      vatRates: [{ id: 5, base: 10_000, amount: 2100 }],
+    },
+    details: [
+      {
+        description: "Product",
+        quantity: 1,
+        unit: 7,
+        unitPrice: "100",
+        vatCondition: 5,
+        vatAmount: 2100,
+        amount: 12_100,
+      },
+    ],
+  };
+  const preview = client.preview(input, { service: "wsmtxca" });
+  preview.request.comprobanteCAERequest.arrayItems.item[0]
+    ?.precioUnitario satisfies string | undefined;
+  // @ts-expect-error Detailed previews expose the actual WSMTXCA request.
+  preview.request.voucherType;
+  const issued = await client.issue(input, {
+    service: "wsmtxca",
+    number: 42,
+    include: { exactInput: true },
+  });
+  if (issued.kind === "authorized") {
+    issued.sent.comprobanteCAERequest.importeTotal satisfies number;
+    if (!issued.recoveredByMatch) {
+      issued.authorization.service satisfies "wsmtxca";
+    }
+  }
+  const { details: _details, ...header } = input;
+  client.preview(header).request satisfies WsfeVoucherInput;
+  const period = {
+    ...header,
+    associatedPeriod: { from: "20260901" as const, to: "20260906" as const },
+  };
+  await client.previewDebitNote(period);
+  await client.issueDebitNote(period, { idempotencyKey: "debit" });
+  const recovery = await client.recover("debit", {
+    include: { exactInput: true },
+  });
+  if (
+    recovery.kind === "authorized" &&
+    "comprobanteCAERequest" in recovery.sent
+  ) {
+    recovery.sent.comprobanteCAERequest.importeTotal satisfies number;
   }
 }

@@ -9,6 +9,9 @@ import type { IssueAmounts } from "./wsfe-amounts";
 import type { VoucherCoordinates, VoucherSummary } from "./wsfe-identity";
 
 export type IssueOptions = {
+  service?: "wsfe" | "wsmtxca";
+  /** An externally reserved number. Never reads the next number when supplied. */
+  number?: number;
   idempotencyKey?: string;
   representedTaxId?: number | string;
   forceRefresh?: boolean;
@@ -27,11 +30,24 @@ export type IssuedVoucher = VoucherCoordinates & {
  * What issue() would send, derived with zero I/O. The voucher number is absent
  * because it is only known when the number is reserved at issuance.
  */
-export type IssuePreview = {
+export type IssuanceService = "wsfe" | "wsmtxca";
+export type ServiceFor<O extends IssueOptions> = "service" extends keyof O
+  ? "wsmtxca" extends O["service"]
+    ? O extends { service: "wsmtxca" }
+      ? "wsmtxca"
+      : IssuanceService
+    : "wsfe"
+  : "wsfe";
+export type ExactIssueInput<S extends IssuanceService = "wsfe"> =
+  S extends "wsmtxca"
+    ? import("./issuance-wsmtxca").WsmtxcaIssueRequest
+    : WsfeVoucherInput;
+export type IssuePreview<S extends IssuanceService = "wsfe"> = {
   voucherClass: VoucherClass;
   voucherType: number;
   amounts: IssueAmounts;
-  request: WsfeVoucherInput;
+  request: ExactIssueInput<S>;
+  service?: S;
 };
 
 type WithRaw<T, O extends IssueOptions> = T &
@@ -41,15 +57,19 @@ type WithRaw<T, O extends IssueOptions> = T &
 type WithSent<O extends IssueOptions> = O extends {
   include: { exactInput: true };
 }
-  ? { sent: WsfeVoucherInput }
+  ? {
+      sent: ExactIssueInput<ServiceFor<O>>;
+    }
   : true extends NonNullable<O["include"]>["exactInput"]
-    ? { sent?: WsfeVoucherInput }
+    ? {
+        sent?: ExactIssueInput<ServiceFor<O>>;
+      }
     : unknown;
 type Evidence<
-  K extends ArcaAuthorizationOutcome<"wsfe">["kind"],
+  K extends ArcaAuthorizationOutcome["kind"],
   O extends IssueOptions,
 > = WithRaw<
-  Omit<Extract<ArcaAuthorizationOutcome<"wsfe">, { kind: K }>, "raw">,
+  Omit<Extract<ArcaAuthorizationOutcome<ServiceFor<O>>, { kind: K }>, "raw">,
   O
 >;
 

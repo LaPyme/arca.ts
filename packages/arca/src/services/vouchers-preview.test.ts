@@ -96,7 +96,7 @@ async function rejected(
 }
 
 describe("vouchers.preview", () => {
-  it("wires the facade on the client", () => {
+  it("wires the high-level API on the client", () => {
     expect(
       createArcaClient({
         taxId: "20123456789",

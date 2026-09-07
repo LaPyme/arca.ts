@@ -34,6 +34,10 @@ export type ArcaClient = {
   preview: VouchersService["preview"];
   /** Issues a credit note against an authorized invoice, partial or full. */
   issueCreditNote: VouchersService["issueCreditNote"];
+  recover: VouchersService["recover"];
+  issueDebitNote: VouchersService["issueDebitNote"];
+  previewCreditNote: VouchersService["previewCreditNote"];
+  previewDebitNote: VouchersService["previewDebitNote"];
   wsfe: WsfeService;
   wsmtxca: WsmtxcaService;
   padron: PadronService;
@@ -68,14 +72,23 @@ export function createArcaClient(config: ArcaClientOptions = {}): ArcaClient {
   });
 
   const wsfe = createWsfeService({ config: normalizedConfig, auth, soap });
-  const vouchers = createVouchersService(wsfe, normalizedConfig);
+  const wsmtxca = createWsmtxcaService({
+    config: normalizedConfig,
+    auth,
+    soap,
+  });
+  const vouchers = createVouchersService(wsfe, normalizedConfig, wsmtxca);
   return {
     config: publicConfig,
     issue: vouchers.issue,
     preview: vouchers.preview,
     issueCreditNote: vouchers.issueCreditNote,
+    recover: vouchers.recover,
+    issueDebitNote: vouchers.issueDebitNote,
+    previewCreditNote: vouchers.previewCreditNote,
+    previewDebitNote: vouchers.previewDebitNote,
     wsfe,
-    wsmtxca: createWsmtxcaService({ config: normalizedConfig, auth, soap }),
+    wsmtxca,
     padron: createPadronService({ config: normalizedConfig, auth, soap }),
   };
 }

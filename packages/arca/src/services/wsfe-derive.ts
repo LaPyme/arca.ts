@@ -10,7 +10,20 @@ import {
   type VoucherClass,
 } from "../constants";
 import { ArcaError, ArcaInputError } from "../errors";
-import { serializeArcaExchangeRate } from "../internal/decimal";
+import {
+  normalizeArcaAmountToMinorUnits,
+  serializeArcaExchangeRate,
+} from "../internal/decimal";
+import {
+  applyIssuanceFields,
+  type InvoiceFamily,
+  ISSUANCE_KEYS,
+  type IssuanceFields,
+  invoiceType,
+  minor,
+  validateFiscalHeader,
+  validateIssuanceFields,
+} from "./issuance-fields";
 import {
   normalizeWsfeDateInput,
   normalizeWsfeVoucherInput,
@@ -26,6 +39,12 @@ import {
 
 export type Receiver =
   | {
+      condition: number;
+      cuit?: string | number;
+      dni?: string | number;
+      document?: { type: number; number: string | number };
+    }
+  | {
       condition: "consumidor_final";
       cuit?: number | string;
       dni?: number | string;
@@ -35,21 +54,33 @@ export type Receiver =
       cuit: number | string;
       dni?: never;
     };
-export type IssueCommon = {
+export type IssueCommon = IssuanceFields & {
+  family?: InvoiceFamily;
+  details?: readonly import("./issuance-wsmtxca").VoucherItemDetail[];
   salesPoint: number;
   to: Receiver;
   total?: number;
   date?: WsfeDateInput;
-  currency?: "ARS" | "USD";
+  currency?: "ARS" | "USD" | { id: string };
   exchangeRate?: string;
   service?: { from: WsfeDateInput; to: WsfeDateInput; dueDate: WsfeDateInput };
 };
 export type IssueInput = IssueCommon &
   (
-    | { issuer: "responsable_inscripto"; items: readonly VatItem[] }
+    | {
+        issuer: "responsable_inscripto";
+        items: readonly VatItem[];
+        amounts?: never;
+      }
     | {
         issuer: "monotributo" | "exento" | "no_alcanzado";
         items: readonly AmountItem[];
+        amounts?: never;
+      }
+    | {
+        issuer: import("../constants").IssuerCondition;
+        amounts: import("./issuance-fields").VoucherAmounts;
+        items?: never;
       }
   );
 
@@ -72,6 +103,9 @@ export function deriveWsfeInvoice(
   assertIssueKeys(
     input,
     [
+      ...ISSUANCE_KEYS,
+      "family",
+      "details",
       "issuer",
       "items",
       "salesPoint",
@@ -84,18 +118,62 @@ export function deriveWsfeInvoice(
     ],
     "input"
   );
+  validateIssuanceFields(input);
+  if (input.amounts !== undefined && input.items !== undefined) {
+    invalid("amounts", "used instead of items, never with items");
+  }
   assertIssuerCondition(input.issuer);
   assertSalesPoint(input.salesPoint);
   const receiver = deriveReceiver(input.to);
   const voucherClass = resolveInvoiceClass(input.issuer, input.to.condition);
   const { data: amountsData, amounts } = calculateWsfeAmounts({
     voucherClass,
-    items: input.items,
-    total: input.total,
+    items: input.amounts
+      ? voucherClass === "C"
+        ? [{ amount: 0 }]
+        : [{ net: 0, vat: 21 }]
+      : input.items,
+    total:
+      input.amounts || input.total === undefined
+        ? undefined
+        : input.total -
+          (input.taxes ?? []).reduce((sum, tax) => sum + tax.amount, 0),
   });
   const currency = deriveCurrency(input);
+  const voucherDate = normalizeWsfeDateInput(
+    input.date === undefined ? buenosAiresDate(now) : input.date,
+    "date"
+  ) as WsfeDateInput;
+  const data: WsfeVoucherInput = {
+    salesPoint: input.salesPoint,
+    voucherType:
+      input.family === undefined
+        ? INVOICE_TYPES[voucherClass]
+        : invoiceType(input.family, voucherClass),
+    voucherDate,
+    ...receiver,
+    ...currency,
+    ...amountsData,
+    ...deriveService(input.service, voucherDate),
+  };
+  applyIssuanceFields(data, input);
+  const extensionTotal = Number(
+    normalizeArcaAmountToMinorUnits(data.netAmount, "net") +
+      normalizeArcaAmountToMinorUnits(data.vatAmount, "vat") +
+      normalizeArcaAmountToMinorUnits(data.exemptAmount, "exempt") +
+      normalizeArcaAmountToMinorUnits(data.nonTaxableAmount, "untaxed") +
+      normalizeArcaAmountToMinorUnits(data.taxAmount, "tax")
+  );
+  const reviewedTotal = input.amounts ? input.total : undefined;
+  data.totalAmount =
+    reviewedTotal === undefined
+      ? extensionTotal / 100
+      : minor(reviewedTotal, "total");
+  const extra = extensionTotal - amounts.sentTotal;
+  amounts.computedTotal += extra;
+  amounts.sentTotal = reviewedTotal ?? extensionTotal;
   if (
-    input.to.condition === "consumidor_final" &&
+    receiver.receiverVatConditionId === 5 &&
     receiver.documentType === ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL
   ) {
     const [whole, fraction = ""] = currency.exchangeRate.split(".");
@@ -116,22 +194,13 @@ export function deriveWsfeInvoice(
       );
     }
   }
-  const voucherDate = normalizeWsfeDateInput(
-    input.date === undefined ? buenosAiresDate(now) : input.date,
-    "date"
-  ) as WsfeDateInput;
-  const data: WsfeVoucherInput = {
-    salesPoint: input.salesPoint,
-    voucherType: INVOICE_TYPES[voucherClass],
-    voucherDate,
-    ...receiver,
-    ...currency,
-    ...amountsData,
-    ...deriveService(input.service, voucherDate),
-  };
+  validateFiscalHeader(data);
   try {
     normalizeWsfeVoucherInput(data);
   } catch (cause) {
+    if (cause instanceof ArcaInputError) {
+      throw cause;
+    }
     throw new ArcaError(
       "The derived invoice failed exact WSFE validation. This is an SDK invariant failure.",
       "ARCA_ISSUE_INVARIANT",
@@ -166,14 +235,26 @@ function assertSalesPoint(salesPoint: number) {
 /** Class resolution: the issuer's condition and the receiver's condition fix it. */
 function resolveInvoiceClass(
   issuer: IssueInput["issuer"],
-  condition: ReceiverCondition
+  condition: ReceiverCondition | number
 ): VoucherClass {
+  if (typeof condition === "number") {
+    return issuer === "responsable_inscripto"
+      ? [1, 6, 13, 16].includes(condition)
+        ? "A"
+        : "B"
+      : "C";
+  }
   return ARCA_INVOICE_CLASS_BY_ISSUER[issuer][condition];
 }
 
 function deriveReceiver(to: Receiver) {
   assertIssueObject(to, "to");
-  assertIssueKeys(to, ["condition", "cuit", "dni"], "to");
+  assertIssueKeys(to, ["condition", "cuit", "dni", "document"], "to");
+  if (typeof to.condition === "number") {
+    return deriveNumericReceiver(
+      to as Extract<Receiver, { condition: number }>
+    );
+  }
   if (
     typeof to.condition !== "string" ||
     !Object.hasOwn(ARCA_RECEIVER_CONDITION_IDS, to.condition)
@@ -237,6 +318,22 @@ export function issueDocumentNumber(
 
 function deriveCurrency(input: IssueCommon) {
   const currency = input.currency === undefined ? "ARS" : input.currency;
+  if (typeof currency === "object" && currency !== null) {
+    assertIssueKeys(currency, ["id"], "currency");
+    if (!/^[A-Z0-9]{3}$/.test(currency.id)) {
+      invalid("currency.id", "a three-character ARCA currency code");
+    }
+    if (input.exchangeRate === undefined) {
+      invalid("exchangeRate", "an explicit rate for this currency");
+    }
+    return {
+      currencyId: currency.id,
+      exchangeRate: serializeArcaExchangeRate(
+        input.exchangeRate,
+        "exchangeRate"
+      ),
+    };
+  }
   if (currency !== "ARS" && currency !== "USD") {
     invalid("currency", "ARS or USD");
   }
@@ -336,7 +433,7 @@ export function assertIssueKeys(
         code: "ARCA_INPUT_RESERVED_FIELD",
         field,
         expected:
-          "a supported facade field; use the exact API for other fiscal fields",
+          "a supported high-level API field; use the exact API for other fiscal fields",
       });
     }
   }
@@ -347,4 +444,50 @@ function invalid(field: string, expected: string): never {
     field,
     expected,
   });
+}
+
+function deriveNumericReceiver(to: Extract<Receiver, { condition: number }>) {
+  if (![1, 4, 5, 6, 7, 8, 9, 10, 13, 15, 16].includes(to.condition)) {
+    invalid("to.condition", "an ARCA receiver condition");
+  }
+  const document = "document" in to ? to.document : undefined;
+  if (document) {
+    assertIssueKeys(document, ["type", "number"], "to.document");
+    if (to.cuit !== undefined || to.dni !== undefined) {
+      invalid("to", "one document identity");
+    }
+    if (
+      !Number.isInteger(document.type) ||
+      document.type < 0 ||
+      document.type > 99 ||
+      !/^\d{1,11}$/.test(String(document.number)) ||
+      !Number.isSafeInteger(Number(document.number))
+    ) {
+      invalid("to.document", "a valid document type and number");
+    }
+    if (document.type === 80 && String(document.number).length !== 11) {
+      invalid("to.document.number", "an 11-digit CUIT");
+    }
+    return {
+      documentType: document.type,
+      documentNumber: Number(document.number),
+      receiverVatConditionId: to.condition,
+    };
+  }
+  if (to.cuit === undefined && to.dni === undefined) {
+    invalid("to", "an explicit document");
+  }
+  if (to.cuit !== undefined && to.dni !== undefined) {
+    invalid("to", "one document identity");
+  }
+  return {
+    documentType: to.cuit === undefined ? 96 : 80,
+    documentNumber: issueDocumentNumber(
+      to.cuit ?? to.dni,
+      "to.document",
+      to.cuit === undefined ? 1 : 11,
+      11
+    ),
+    receiverVatConditionId: to.condition,
+  };
 }

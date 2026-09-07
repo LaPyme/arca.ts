@@ -159,6 +159,11 @@ export type WsfeVoucherInfo = {
   paymentDueDate?: string;
   taxes?: WsfeTax[];
   associatedVouchers?: WsfeAssociatedVoucher[];
+  associatedPeriod?: WsfeAssociatedPeriod;
+  optionalFields?: WsfeOptionalField[];
+  buyers?: WsfeBuyer[];
+  activities?: WsfeActivity[];
+  sameCurrencyForeignCancellation?: "S" | "N";
   raw: Record<string, unknown>;
 };
 
@@ -1409,11 +1414,54 @@ function mapWsfeVoucherInfo(raw: Record<string, unknown>): WsfeVoucherInfo {
         type,
         salesPoint,
         number,
+        ...(normalizeWsfeString(item.Cuit)
+          ? { taxId: normalizeWsfeString(item.Cuit) }
+          : {}),
         ...(normalizeWsfeString(item.CbteFch)
           ? { voucherDate: normalizeWsfeString(item.CbteFch) as WsfeDateInput }
           : {}),
       };
     })
+  );
+  const period = toWsfeRecord(raw.PeriodoAsoc);
+  if (period?.FchDesde && period.FchHasta) {
+    voucher.associatedPeriod = {
+      startDate: String(period.FchDesde) as WsfeDateInput,
+      endDate: String(period.FchHasta) as WsfeDateInput,
+    };
+  }
+  if (raw.CanMisMonExt === "S" || raw.CanMisMonExt === "N") {
+    voucher.sameCurrencyForeignCancellation = raw.CanMisMonExt;
+  }
+  voucher.optionalFields = mapWsfeLookupDetails(
+    raw.Opcionales,
+    "Opcional",
+    (item) =>
+      item.Id === undefined || item.Valor === undefined
+        ? undefined
+        : { id: String(item.Id), value: String(item.Valor) }
+  );
+  voucher.buyers = mapWsfeLookupDetails(
+    raw.Compradores,
+    "Comprador",
+    (item) => {
+      const documentType = normalizeWsfeNumber(item.DocTipo),
+        documentNumber = normalizeWsfeNumber(item.DocNro),
+        percentage = normalizeWsfeNumber(item.Porcentaje);
+      return documentType === undefined ||
+        documentNumber === undefined ||
+        percentage === undefined
+        ? undefined
+        : { documentType, documentNumber, percentage };
+    }
+  );
+  voucher.activities = mapWsfeLookupDetails(
+    raw.Actividades,
+    "Actividad",
+    (item) => {
+      const id = normalizeWsfeNumber(item.Id);
+      return id === undefined ? undefined : { id };
+    }
   );
   return voucher;
 }

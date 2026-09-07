@@ -68,7 +68,7 @@ export const ARCA_CURRENCIES = {
   DOL: "DOL",
 } as const;
 
-/** Legal assertions supported by the invoice facade; never inferred from Padrón. */
+/** Legal assertions supported by the invoice high-level API; never inferred from Padrón. */
 export type IssuerCondition =
   | "responsable_inscripto"
   | "monotributo"

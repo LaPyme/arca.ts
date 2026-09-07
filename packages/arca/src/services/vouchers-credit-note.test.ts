@@ -213,14 +213,17 @@ describe("credit note orchestration", () => {
     ["both modes", { for: target, all: true, items: [{ amount: 40 }] }],
     ["all: false", { for: target, all: false }],
     ["all with a total", { for: target, all: true, total: 40 }],
-    ["a debit note target", { for: { ...target, voucherType: 12 }, all: true }],
     [
-      "an A debit note target",
-      { for: { ...target, voucherType: 2 }, all: true },
+      "a credit note target",
+      { for: { ...target, voucherType: 13 }, all: true },
     ],
     [
-      "a B debit note target",
-      { for: { ...target, voucherType: 7 }, all: true },
+      "an A credit note target",
+      { for: { ...target, voucherType: 3 }, all: true },
+    ],
+    [
+      "a B credit note target",
+      { for: { ...target, voucherType: 8 }, all: true },
     ],
     ["an associated period", { for: target, all: true, associatedPeriod: {} }],
     ["a receiver", { for: target, all: true, to: { condition: "exento" } }],

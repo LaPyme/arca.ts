@@ -14,13 +14,24 @@ import {
   storeCall,
 } from "../store/types";
 import type { ArcaAuthorizationOutcome } from "./fiscal-evidence";
+import { validateFiscalHeader, voucherFamily } from "./issuance-fields";
+import {
+  createWsmtxcaIssuanceService,
+  type FiscalHeader,
+  matchWsmtxcaDetails,
+  wsmtxcaRequest,
+} from "./issuance-wsmtxca";
 import type {
+  ExactIssueInput,
+  IssuanceService,
   IssuedVoucher,
   IssueOptions,
   IssueOutcome,
   IssuePreview,
+  ServiceFor,
 } from "./vouchers-types";
 import {
+  normalizeWsfeDateInput,
   normalizeWsfeVoucherInput,
   type WsfeService,
   type WsfeVoucherInput,
@@ -43,8 +54,40 @@ import {
   toVoucherSummary,
   type VoucherCoordinates,
 } from "./wsfe-identity";
+import type { WsmtxcaService } from "./wsmtxca";
 
+export type PeriodNoteInput = IssueInput & {
+  associatedPeriod: {
+    from: import("./wsfe").WsfeDateInput;
+    to: import("./wsfe").WsfeDateInput;
+  };
+  for?: never;
+};
+export type DebitNoteInput =
+  | (CreditNoteInput & { all?: never })
+  | PeriodNoteInput;
+export type RecoveryOptions = Pick<
+  IssueOptions,
+  "representedTaxId" | "forceRefresh" | "include"
+>;
 export type VouchersService = {
+  /** Consults a durable reservation. Never allocates or authorizes a voucher. */
+  recover<O extends RecoveryOptions = { include?: never }>(
+    idempotencyKey: string,
+    options?: O
+  ): Promise<IssueOutcome<O & { service?: IssuanceService }>>;
+  issueDebitNote<O extends IssueOptions = { include?: never }>(
+    input: DebitNoteInput,
+    options?: O
+  ): Promise<IssueOutcome<O>>;
+  previewCreditNote<O extends PreviewOptions = { service?: never }>(
+    input: CreditNoteInput | PeriodNoteInput,
+    options?: O
+  ): Promise<IssuePreview<ServiceFor<O>>>;
+  previewDebitNote<O extends PreviewOptions = { service?: never }>(
+    input: DebitNoteInput,
+    options?: O
+  ): Promise<IssuePreview<ServiceFor<O>>>;
   /**
    * Issues a credit note against an authorized A, B or C invoice. The note
    * credits the chosen `items`, or the whole original with `all: true`.
@@ -54,7 +97,7 @@ export type VouchersService = {
    * dates. ARCA has no cancellation; both modes write a real fiscal document.
    */
   issueCreditNote<O extends IssueOptions = { include?: never }>(
-    input: CreditNoteInput,
+    input: CreditNoteInput | PeriodNoteInput,
     options?: O
   ): Promise<IssueOutcome<O>>;
   /**
@@ -75,33 +118,100 @@ export type VouchersService = {
    * It throws every input error issue() throws before its first call, so a
    * caller that previews and then issues sees no new local error.
    */
-  preview(input: IssueInput, options?: PreviewOptions): IssuePreview;
+  preview<
+    O extends Pick<PreviewOptions, "representedTaxId" | "service"> = {
+      service?: never;
+    },
+  >(input: IssueInput, options?: O): IssuePreview<ServiceFor<O>>;
 };
 
-type PreviewOptions = { representedTaxId?: number | string };
+export type PreviewOptions = {
+  representedTaxId?: number | string;
+  service?: "wsfe" | "wsmtxca";
+  forceRefresh?: boolean;
+};
 
-type IssueWsfeService = Pick<
-  WsfeService,
-  "getNextVoucherNumber" | "issue" | "lookupVoucher"
->;
+type IssueWsfeService = {
+  getNextVoucherNumber: WsfeService["getNextVoucherNumber"];
+  issue: (
+    input: Parameters<WsfeService["issue"]>[0]
+  ) => Promise<ArcaAuthorizationOutcome>;
+  lookupVoucher: (
+    input: Parameters<WsfeService["lookupVoucher"]>[0]
+  ) => Promise<
+    import("./fiscal-evidence").ArcaVoucherLookupResult<
+      import("./wsfe").WsfeVoucherInfo
+    >
+  >;
+};
 type StoreContext = {
   store?: ArcaStore;
   environment: ArcaEnvironment;
   taxId: string;
 };
-type Prepared = ReturnType<typeof deriveWsfeInvoice>;
+type Prepared = Omit<ReturnType<typeof deriveWsfeInvoice>, "data"> & {
+  data: FiscalHeader;
+};
 
 export function createVouchersService(
   wsfe: IssueWsfeService,
-  context?: StoreContext
+  context?: StoreContext,
+  wsmtxca?: WsmtxcaService
 ): VouchersService {
+  const select = (options: IssueOptions = {}): IssueWsfeService => {
+    validateOptions(options);
+    if (options.service !== "wsmtxca") {
+      return wsfe;
+    }
+    if (!wsmtxca) {
+      throw new ArcaConfigurationError("WSMTXCA service is not configured");
+    }
+    return createWsmtxcaIssuanceService(wsmtxca);
+  };
   return {
+    recover: async (key, options) =>
+      recoverOperation(
+        select,
+        key,
+        options === undefined ? {} : options,
+        context
+      ) as Promise<IssueOutcome<typeof options & IssueOptions>>,
+    issueDebitNote: async (input, options) =>
+      issueCreditNote(
+        select(options),
+        input,
+        options ?? {},
+        context,
+        "debitNote"
+      ) as Promise<IssueOutcome<typeof options & IssueOptions>>,
+    previewCreditNote: async <O extends PreviewOptions = { service?: never }>(
+      input: CreditNoteInput | PeriodNoteInput,
+      options?: O
+    ) =>
+      previewNote(
+        select(options),
+        input,
+        options ?? {},
+        context,
+        "creditNote"
+      ) as Promise<IssuePreview<ServiceFor<O>>>,
+    previewDebitNote: async <O extends PreviewOptions = { service?: never }>(
+      input: DebitNoteInput,
+      options?: O
+    ) =>
+      previewNote(
+        select(options),
+        input,
+        options ?? {},
+        context,
+        "debitNote"
+      ) as Promise<IssuePreview<ServiceFor<O>>>,
     issueCreditNote: async <O extends IssueOptions = { include?: never }>(
-      input: CreditNoteInput,
+      input: CreditNoteInput | PeriodNoteInput,
       options?: O
     ): Promise<IssueOutcome<O>> => {
       const result = await issueCreditNote(
-        wsfe,
+        select(options),
         input,
         options === undefined ? {} : options,
         context
@@ -113,7 +223,7 @@ export function createVouchersService(
       options?: O
     ): Promise<IssueOutcome<O>> => {
       const result = await issueInvoice(
-        wsfe,
+        select(options),
         input,
         options === undefined ? {} : options,
         context
@@ -121,8 +231,18 @@ export function createVouchersService(
       // issueInvoice conditionally adds the fields specified by O at runtime.
       return result as IssueOutcome<O>;
     },
-    preview: (input: IssueInput, options?: PreviewOptions): IssuePreview =>
-      previewInvoice(input, options === undefined ? {} : options),
+    preview: <
+      O extends Pick<PreviewOptions, "representedTaxId" | "service"> = {
+        service?: never;
+      },
+    >(
+      input: IssueInput,
+      options?: O
+    ) =>
+      previewInvoice(
+        input,
+        options === undefined ? {} : options
+      ) as IssuePreview<ServiceFor<O>>,
   };
 }
 
@@ -130,9 +250,10 @@ export function createVouchersService(
 function previewInvoice(
   input: IssueInput,
   options: PreviewOptions
-): IssuePreview {
+): IssuePreview<IssuanceService> {
   assertIssueObject(options, "options");
-  assertIssueKeys(options, ["representedTaxId"], "options");
+  assertIssueKeys(options, ["representedTaxId", "service"], "options");
+  validateOptions(options);
   if (options.representedTaxId !== undefined) {
     issueDocumentNumber(
       options.representedTaxId,
@@ -141,24 +262,51 @@ function previewInvoice(
       11
     );
   }
-  const { data, voucherClass, amounts } = deriveWsfeInvoice(input);
+  return toPreview(prepareInvoice(input, options), options);
+}
+function prepareInvoice(input: IssueInput, options: IssueOptions): Prepared {
+  const prepared: Prepared = deriveWsfeInvoice(input);
+  if (input.details !== undefined) {
+    prepared.data.details = structuredClone(input.details);
+  }
+  validatePrepared(prepared, options);
+  return prepared;
+}
+function validatePrepared(prepared: Prepared, options: IssueOptions): void {
+  validateFiscalHeader(prepared.data);
+  if (options.service === "wsmtxca") {
+    wsmtxcaRequest(prepared.data);
+  } else if (prepared.data.details !== undefined) {
+    throw new ArcaInputError("Detailed items require service: wsmtxca", {
+      code: "ARCA_INPUT_INVALID_VALUE",
+      field: "details",
+    });
+  }
+}
+function toPreview(
+  prepared: Prepared,
+  options: IssueOptions
+): IssuePreview<IssuanceService> {
+  const { data, voucherClass, amounts } = prepared;
   return {
     voucherClass,
     voucherType: data.voucherType,
     amounts,
-    request: data,
+    request: options.service === "wsmtxca" ? wsmtxcaRequest(data) : data,
+    ...(options.service === "wsmtxca" ? { service: "wsmtxca" as const } : {}),
   };
 }
 
 async function issueInvoice(
   wsfe: IssueWsfeService,
   input: IssueInput,
-  options: IssueOptions,
+  inputOptions: IssueOptions,
   context?: StoreContext
 ): Promise<IssueOutcome<IssueOptions>> {
+  const options = structuredClone(inputOptions);
   validateOptions(options);
   validateKeyStore(options, context);
-  const prepared = deriveWsfeInvoice(input);
+  const prepared = prepareInvoice(input, options);
   return await runOperation(
     wsfe,
     "issue",
@@ -192,7 +340,12 @@ async function runOperation(
     options.representedTaxId === undefined
       ? undefined
       : String(options.representedTaxId);
-  const inputHash = canonicalHash({ input, representedTaxId });
+  const inputHash = canonicalHash({
+    input,
+    representedTaxId,
+    ...(options.service === "wsmtxca" ? { service: "wsmtxca" } : {}),
+    ...(options.number === undefined ? {} : { number: options.number }),
+  });
   const existing = await storeCall(() => store.get(key));
   if (existing !== null) {
     return replay(existing);
@@ -202,6 +355,7 @@ async function runOperation(
   const record: ArcaAttemptRecord = {
     v: 1,
     operation,
+    ...(options.service === "wsmtxca" ? { service: "wsmtxca" as const } : {}),
     representedTaxId,
     inputHash,
     number,
@@ -224,6 +378,7 @@ async function runOperation(
   function replay(json: string) {
     const stored = readRecord(json);
     if (
+      (stored.service ?? "wsfe") !== (options.service ?? "wsfe") ||
       stored.operation !== operation ||
       stored.inputHash !== inputHash ||
       stored.representedTaxId !== representedTaxId
@@ -276,7 +431,7 @@ function readRecord(json: string): ArcaAttemptRecord {
     if (
       !record ||
       record.v !== 1 ||
-      !["issue", "creditNote"].includes(record.operation) ||
+      !["issue", "creditNote", "debitNote"].includes(record.operation) ||
       typeof record.inputHash !== "string" ||
       !record.sent ||
       !Number.isSafeInteger(record.number) ||
@@ -288,6 +443,16 @@ function readRecord(json: string): ArcaAttemptRecord {
       throw new Error("Invalid reservation structure");
     }
     normalizeWsfeVoucherInput(record.sent);
+    if (
+      record.service !== undefined &&
+      record.service !== "wsfe" &&
+      record.service !== "wsmtxca"
+    ) {
+      throw new Error("Invalid provider");
+    }
+    if (record.service === "wsmtxca") {
+      wsmtxcaRequest(record.sent, record.number);
+    }
     return record;
   } catch (cause) {
     throw new ArcaConfigurationError(
@@ -303,11 +468,7 @@ function preparedFromRecord(record: ArcaAttemptRecord): Prepared {
   );
   return {
     data: record.sent,
-    voucherClass: [1, 3].includes(record.voucherType)
-      ? "A"
-      : [6, 8].includes(record.voucherType)
-        ? "B"
-        : "C",
+    voucherClass: voucherFamily(record.voucherType).voucherClass,
     amounts: { computedTotal: sentTotal, sentTotal, vatAdjustment: 0 },
   };
 }
@@ -317,6 +478,9 @@ async function nextNumber(
   data: WsfeVoucherInput,
   options: IssueOptions
 ): Promise<number> {
+  if (options.number !== undefined) {
+    return options.number;
+  }
   const number = await wsfe.getNextVoucherNumber({
     representedTaxId: options.representedTaxId,
     forceRefresh: options.forceRefresh,
@@ -325,8 +489,14 @@ async function nextNumber(
   });
   if (!Number.isSafeInteger(number) || number < 1 || number > 99_999_999) {
     throw new ArcaServiceError(
-      "WSFE returned an invalid next voucher number.",
-      { service: "wsfe", operation: "FECompUltimoAutorizado" }
+      "ARCA returned an invalid next voucher number.",
+      {
+        service: options.service ?? "wsfe",
+        operation:
+          options.service === "wsmtxca"
+            ? "consultarUltimoComprobanteAutorizado"
+            : "FECompUltimoAutorizado",
+      }
     );
   }
   return number;
@@ -351,7 +521,7 @@ async function runAuthorization(
     voucherType: data.voucherType,
     number,
   };
-  const exact = includeExact ? { sent: data } : {};
+  const exact = exactEvidence(data, number, options, includeExact);
   const voucher = (cae: string, caeExpiry: string): IssuedVoucher => ({
     ...attempted,
     voucherClass,
@@ -360,9 +530,18 @@ async function runAuthorization(
     caeExpiry,
     amounts,
   });
-  const recovery = { wsfe, auth, data, attempted, includeRaw, exact, voucher };
+  const recovery = {
+    wsfe,
+    auth,
+    data,
+    attempted,
+    includeRaw,
+    exact,
+    voucher,
+    service: options.service,
+  };
   if (replay) {
-    const attempt = replayEvidence();
+    const attempt = replayEvidence(options.service);
     let lookup: Awaited<ReturnType<IssueWsfeService["lookupVoucher"]>>;
     try {
       lookup = await wsfe.lookupVoucher({ ...auth, ...attempted });
@@ -400,9 +579,10 @@ async function runAuthorization(
   if (authorization.kind === "rejected") {
     if (
       options.idempotencyKey !== undefined &&
-      [...authorization.errors, ...authorization.observations].some(
-        (issue) => issue.code === "10016"
-      )
+      (options.service === "wsmtxca" ||
+        [...authorization.errors, ...authorization.observations].some(
+          (issue) => issue.code === "10016"
+        ))
     ) {
       const recovered = await recoverInvoice({
         ...recovery,
@@ -445,6 +625,7 @@ async function runAuthorization(
   const attempt = projectEvidence(uncertain, includeRaw);
   return recoverInvoice({
     wsfe,
+    service: options.service,
     auth,
     data,
     attempted,
@@ -459,14 +640,15 @@ type RecoveryInput = {
   wsfe: IssueWsfeService;
   lookup?: Awaited<ReturnType<IssueWsfeService["lookupVoucher"]>>;
   auth: Pick<IssueOptions, "representedTaxId" | "forceRefresh">;
-  data: WsfeVoucherInput;
+  data: FiscalHeader;
+  service?: "wsfe" | "wsmtxca";
   attempted: VoucherCoordinates;
   attempt: Omit<
-    Extract<ArcaAuthorizationOutcome<"wsfe">, { kind: "indeterminate" }>,
+    Extract<ArcaAuthorizationOutcome, { kind: "indeterminate" }>,
     "raw"
   > & { raw?: Record<string, unknown> };
   includeRaw: boolean;
-  exact: { sent?: WsfeVoucherInput };
+  exact: { sent?: ExactIssueInput<IssuanceService> };
   voucher: (cae: string, caeExpiry: string) => IssuedVoucher;
 };
 async function recoverInvoice({
@@ -479,6 +661,7 @@ async function recoverInvoice({
   exact,
   voucher,
   lookup: suppliedLookup,
+  service,
 }: RecoveryInput): Promise<IssueOutcome<IssueOptions>> {
   let lookup: Awaited<ReturnType<IssueWsfeService["lookupVoucher"]>>;
   try {
@@ -501,11 +684,26 @@ async function recoverInvoice({
       lookup: { kind: "not_found", ...raw },
     };
   }
-  const matched = matchWsfeVoucherIdentity(
-    data,
-    attempted.number,
-    lookup.voucher
-  );
+  const detailsMatch =
+    service === "wsmtxca"
+      ? matchWsmtxcaDetails(data, attempted.number, lookup.voucher.raw)
+      : undefined;
+  const matched =
+    detailsMatch === undefined
+      ? matchWsfeVoucherIdentity(data, attempted.number, lookup.voucher)
+      : detailsMatch === "match" &&
+          lookup.voucher.cae &&
+          lookup.voucher.caeExpiry
+        ? { matches: true as const }
+        : {
+            matches: false as const,
+            evidence:
+              detailsMatch === "conflict"
+                ? ("conflict" as const)
+                : ("incomplete" as const),
+            reason:
+              "WSMTXCA consultation does not match the complete reserved request",
+          };
   if (!matched.matches) {
     if (matched.evidence === "conflict") {
       return {
@@ -550,7 +748,7 @@ function projectIssue(issue: ArcaAuthorizationOutcome["errors"][number]) {
       : { resultLevel: issue.resultLevel }),
   };
 }
-function projectEvidence<T extends ArcaAuthorizationOutcome<"wsfe">>(
+function projectEvidence<T extends ArcaAuthorizationOutcome>(
   evidence: T,
   includeRaw: boolean
 ): Omit<T, "raw"> & { raw?: Record<string, unknown> } {
@@ -601,9 +799,37 @@ function validateOptions(options: IssueOptions) {
   assertIssueObject(options, "options");
   assertIssueKeys(
     options,
-    ["representedTaxId", "forceRefresh", "include", "idempotencyKey"],
+    [
+      "representedTaxId",
+      "forceRefresh",
+      "include",
+      "idempotencyKey",
+      "service",
+      "number",
+    ],
     "options"
   );
+  if (
+    options.service !== undefined &&
+    options.service !== "wsfe" &&
+    options.service !== "wsmtxca"
+  ) {
+    throw new ArcaInputError("Unknown fiscal service", {
+      code: "ARCA_INPUT_INVALID_VALUE",
+      field: "options.service",
+    });
+  }
+  if (
+    options.number !== undefined &&
+    (!Number.isSafeInteger(options.number) ||
+      options.number < 1 ||
+      options.number > 99_999_999)
+  ) {
+    throw new ArcaInputError("Invalid reserved number", {
+      code: "ARCA_INPUT_INVALID_VALUE",
+      field: "options.number",
+    });
+  }
   if (options.representedTaxId !== undefined) {
     issueDocumentNumber(
       options.representedTaxId,
@@ -641,11 +867,13 @@ function validateOptions(options: IssueOptions) {
   }
 }
 
-function replayEvidence(): RecoveryInput["attempt"] {
+function replayEvidence(
+  service: "wsfe" | "wsmtxca" = "wsfe"
+): RecoveryInput["attempt"] {
   return {
     kind: "indeterminate",
-    service: "wsfe",
-    operation: "FECAESolicitar",
+    service,
+    operation: service === "wsfe" ? "FECAESolicitar" : "autorizarComprobante",
     reason: "incomplete_response",
     results: {},
     errors: [],
@@ -655,51 +883,246 @@ function replayEvidence(): RecoveryInput["attempt"] {
 
 async function issueCreditNote(
   wsfe: IssueWsfeService,
-  input: CreditNoteInput,
-  options: IssueOptions,
-  context?: StoreContext
+  input: CreditNoteInput | PeriodNoteInput,
+  inputOptions: IssueOptions,
+  context?: StoreContext,
+  kind: "creditNote" | "debitNote" = "creditNote"
 ): Promise<IssueOutcome<IssueOptions>> {
+  const options = structuredClone(inputOptions);
   validateOptions(options);
   validateKeyStore(options, context);
-  // The mode and the target are settled before any I/O, on a caller-proof copy.
-  const note = assertCreditNoteInput(input);
-  const target = note.for;
+  // Copy before the first await: caller mutation must not change the reservation.
+  assertIssueObject(input, "input");
+  const note =
+    "associatedPeriod" in input && !("for" in input)
+      ? structuredClone(input)
+      : assertCreditNoteInput(input as CreditNoteInput);
+  if (kind === "debitNote" && "all" in note && note.all) {
+    throw new ArcaInputError("Debit notes require explicit items", {
+      code: "ARCA_INPUT_INVALID_VALUE",
+      field: "items",
+    });
+  }
   return await runOperation(
     wsfe,
-    "creditNote",
+    kind,
     note,
-    async () => {
-      const original = await wsfe.lookupVoucher({
-        representedTaxId: options.representedTaxId,
-        forceRefresh: options.forceRefresh,
-        salesPoint: target.salesPoint,
-        voucherType: target.voucherType,
-        number: target.number,
-      });
-      if (original.kind === "not_found") {
-        throw new ArcaInputError(
-          "issueCreditNote failed: original voucher not found.",
-          {
-            code: "ARCA_INPUT_INVALID_VALUE",
-            field: "input.for",
-          }
-        );
-      }
-      if (
-        original.voucher.salesPoint !== target.salesPoint ||
-        original.voucher.voucherType !== target.voucherType ||
-        original.voucher.voucherNumber !== target.number
-      ) {
-        throw new ArcaInputError(
-          "issueCreditNote failed: the original lookup coordinates do not match input.for.",
-          { code: "ARCA_INPUT_INVALID_VALUE", field: "input.for" }
-        );
-      }
-      return note.all === true
-        ? deriveWsfeFullCreditNote(original.voucher, note)
-        : deriveWsfePartialCreditNote(original.voucher, note);
-    },
+    () => prepareNote(wsfe, note, options, context, kind),
     options,
     context
   );
+}
+async function previewNote(
+  wsfe: IssueWsfeService,
+  input: CreditNoteInput | PeriodNoteInput,
+  inputOptions: PreviewOptions,
+  context: StoreContext | undefined,
+  kind: "creditNote" | "debitNote"
+): Promise<IssuePreview<IssuanceService>> {
+  const options = structuredClone(inputOptions);
+  assertIssueKeys(
+    options,
+    ["representedTaxId", "service", "forceRefresh"],
+    "options"
+  );
+  return toPreview(
+    await prepareNote(wsfe, input, options, context, kind),
+    options
+  );
+}
+
+async function prepareNote(
+  wsfe: IssueWsfeService,
+  input: CreditNoteInput | PeriodNoteInput,
+  options: IssueOptions,
+  context: StoreContext | undefined,
+  kind: "creditNote" | "debitNote"
+): Promise<Prepared> {
+  validateOptions(options);
+  assertIssueObject(input, "input");
+  if ("associatedPeriod" in input && !("for" in input)) {
+    return preparePeriodNote(input, options, kind);
+  }
+  const note = assertCreditNoteInput(input as CreditNoteInput);
+  if (kind === "debitNote" && note.all) {
+    throw new ArcaInputError("Debit notes require explicit items", {
+      code: "ARCA_INPUT_INVALID_VALUE",
+    });
+  }
+  const target = note.for;
+  const original = await wsfe.lookupVoucher({
+    representedTaxId: options.representedTaxId,
+    forceRefresh: options.forceRefresh,
+    ...target,
+  });
+  if (original.kind !== "found") {
+    throw new ArcaInputError(
+      "issueCreditNote failed: original voucher not found",
+      { code: "ARCA_INPUT_INVALID_VALUE", field: "input.for" }
+    );
+  }
+  if (
+    original.voucher.salesPoint !== target.salesPoint ||
+    original.voucher.voucherType !== target.voucherType ||
+    original.voucher.voucherNumber !== target.number
+  ) {
+    throw new ArcaInputError(
+      "Original lookup coordinates do not match input.for",
+      { code: "ARCA_INPUT_INVALID_VALUE", field: "input.for" }
+    );
+  }
+  const prepared: Prepared =
+    note.all === true
+      ? deriveWsfeFullCreditNote(original.voucher, note)
+      : deriveWsfePartialCreditNote(original.voucher, note, new Date(), kind);
+  if (note.details !== undefined) {
+    prepared.data.details = structuredClone(note.details);
+  } else if (note.all && "details" in original.voucher) {
+    prepared.data.details = structuredClone(
+      original.voucher.details as FiscalHeader["details"]
+    );
+  }
+  if (voucherFamily(prepared.data.voucherType).family === "fce") {
+    const taxId = options.representedTaxId ?? context?.taxId;
+    if (!taxId) {
+      throw new ArcaInputError("FCE association requires the issuer tax ID", {
+        code: "ARCA_INPUT_MISSING_FIELD",
+        field: "representedTaxId",
+      });
+    }
+    for (const associated of prepared.data.associatedVouchers ?? []) {
+      associated.taxId = String(taxId);
+    }
+  }
+  validatePrepared(prepared, options);
+  return prepared;
+}
+
+function preparePeriodNote(
+  input: PeriodNoteInput,
+  options: IssueOptions,
+  kind: "creditNote" | "debitNote"
+): Prepared {
+  const { associatedPeriod, ...invoice } = input;
+  assertIssueObject(associatedPeriod, "associatedPeriod");
+  assertIssueKeys(associatedPeriod, ["from", "to"], "associatedPeriod");
+  if (
+    normalizeWsfeDateInput(associatedPeriod.from, "associatedPeriod.from") >
+    normalizeWsfeDateInput(associatedPeriod.to, "associatedPeriod.to")
+  ) {
+    throw new ArcaInputError("Associated period starts after its end", {
+      code: "ARCA_INPUT_INVALID_VALUE",
+      field: "associatedPeriod",
+    });
+  }
+  const prepared = prepareInvoice(invoice, options);
+  const family = voucherFamily(prepared.data.voucherType);
+  if (family.family === "fce") {
+    throw new ArcaInputError("FCE notes require an associated invoice", {
+      code: "ARCA_INPUT_INVALID_VALUE",
+      field: "associatedPeriod",
+    });
+  }
+  prepared.data.voucherType = family.types[
+    kind === "creditNote" ? 2 : 1
+  ] as number;
+  prepared.data.associatedPeriod = {
+    startDate: associatedPeriod.from,
+    endDate: associatedPeriod.to,
+  };
+  normalizeWsfeVoucherInput(prepared.data);
+  validatePrepared(prepared, options);
+  return prepared;
+}
+
+function exactEvidence(
+  data: FiscalHeader,
+  number: number,
+  options: IssueOptions,
+  include: boolean
+): { sent?: ExactIssueInput<IssuanceService> } {
+  return include
+    ? {
+        sent:
+          options.service === "wsmtxca" ? wsmtxcaRequest(data, number) : data,
+      }
+    : {};
+}
+
+async function recoverOperation(
+  select: (options: IssueOptions) => IssueWsfeService,
+  key: string,
+  inputOptions: RecoveryOptions,
+  context?: StoreContext
+): Promise<IssueOutcome<IssueOptions>> {
+  const options = structuredClone(inputOptions);
+  assertIssueObject(options, "options");
+  assertIssueKeys(
+    options,
+    ["representedTaxId", "forceRefresh", "include"],
+    "options"
+  );
+  validateOptions(options);
+  validateKeyStore({ ...options, idempotencyKey: key }, context);
+  const json = await storeCall(() =>
+    (context as StoreContext & { store: ArcaStore }).store.get(
+      attemptKey(
+        (context as StoreContext).environment,
+        (context as StoreContext).taxId,
+        key
+      )
+    )
+  );
+  if (json === null) {
+    throw new ArcaInputError("No reservation exists for this idempotency key", {
+      code: "ARCA_INPUT_INVALID_VALUE",
+      field: "idempotencyKey",
+    });
+  }
+  const record = readRecord(json);
+  if (
+    options.representedTaxId !== undefined &&
+    String(options.representedTaxId) !==
+      (record.representedTaxId ?? context?.taxId)
+  ) {
+    throw new ArcaInputError(
+      "Reservation belongs to another represented taxpayer",
+      { code: "ARCA_INPUT_IDEMPOTENCY_MISMATCH" }
+    );
+  }
+  const storedOptions = {
+    ...options,
+    service: record.service ?? ("wsfe" as const),
+    representedTaxId: record.representedTaxId,
+  };
+  const prepared = preparedFromRecord(record);
+  return recoverInvoice({
+    wsfe: select(storedOptions),
+    service: storedOptions.service,
+    auth: storedOptions,
+    data: prepared.data,
+    attempted: {
+      salesPoint: record.salesPoint,
+      voucherType: record.voucherType,
+      number: record.number,
+    },
+    attempt: replayEvidence(storedOptions.service),
+    includeRaw: options.include?.raw === true,
+    exact: exactEvidence(
+      prepared.data,
+      record.number,
+      storedOptions,
+      options.include?.exactInput === true
+    ),
+    voucher: (cae, caeExpiry) => ({
+      salesPoint: record.salesPoint,
+      voucherType: record.voucherType,
+      number: record.number,
+      voucherClass: prepared.voucherClass,
+      date: prepared.data.voucherDate,
+      amounts: prepared.amounts,
+      cae,
+      caeExpiry,
+    }),
+  });
 }
