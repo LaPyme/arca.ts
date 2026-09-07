@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -22,6 +23,20 @@ afterEach(() => {
 });
 
 describe("runInit", () => {
+  it("creates the target directory when it does not exist", async () => {
+    const { io, directory } = createTestIo();
+    const nested = join(directory, "creds", "arca");
+
+    const code = await runInit(
+      io,
+      { cuit: "20123456786", env: "test", dir: nested },
+      createWriter(io.stdout, { color: false })
+    );
+
+    expect(code).toBe(0);
+    expect(existsSync(join(nested, "arca-test.key"))).toBe(true);
+  });
+
   it("writes the key and the CSR and prints the ARCA steps", async () => {
     const { io, stdout, directory } = createTestIo();
 

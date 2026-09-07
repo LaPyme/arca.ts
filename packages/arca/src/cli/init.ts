@@ -1,4 +1,10 @@
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { ARCA_ENVIRONMENTS } from "../config";
 import type { ArcaEnvironment } from "../internal/types";
@@ -62,6 +68,7 @@ export async function runInit(
     commonName,
     organization: flags.org?.trim() || taxId,
   });
+  mkdirSync(directory, { recursive: true });
   writeFileSync(keyPath, material.privateKeyPem, { mode: KEY_FILE_MODE });
   chmodSync(keyPath, KEY_FILE_MODE);
   writeFileSync(csrPath, material.csrPem);
