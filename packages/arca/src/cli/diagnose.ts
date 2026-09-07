@@ -32,6 +32,7 @@ export type CliDiagnosisKey =
   | "wsfe.authentication_rejected"
   | "wsfe.serviceError"
   | "salesPoint.missing"
+  | "salesPoint.none"
   | "salesPoint.blocked";
 
 /** What went wrong, and the page and action that fix it. Both in castellano. */
@@ -155,6 +156,10 @@ export const CLI_DIAGNOSES: Record<CliDiagnosisKey, CliDiagnosis> = {
     diagnosis:
       "El punto de venta {salesPoint} no está habilitado para web services.",
     fix: `ARCA → ${ARCA_PAGES.salesPoints} → Nuevo → el sistema de web services de tu condición ("${ARCA_PAGES.salesPointsSystem}" para responsable inscripto).`,
+  },
+  "salesPoint.none": {
+    diagnosis: "ARCA no informa ningún punto de venta para web services.",
+    fix: `ARCA → ${ARCA_PAGES.salesPoints} → Nuevo → "${ARCA_PAGES.salesPointsSystem}" para responsable inscripto, "${ARCA_PAGES.salesPointsSystemMonotributo}" para monotributo.`,
   },
   "salesPoint.blocked": {
     diagnosis: "El punto de venta {salesPoint} está bloqueado.",

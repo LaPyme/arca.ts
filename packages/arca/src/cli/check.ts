@@ -697,15 +697,17 @@ function checkSalesPoints(
   }
 
   if (points.length === 0) {
-    return {
-      name: "salesPoints",
-      ok: true,
-      detail: "ninguno informado",
-      warning:
-        environment === "test"
-          ? EMPTY_IN_TEST_WARNING
-          : "ARCA no informó ningún punto de venta",
-    };
+    // In homologación ARCA often reports nothing for points that work. In
+    // production an empty list is the whole answer: no invoice can be issued.
+    if (environment === "test") {
+      return {
+        name: "salesPoints",
+        ok: true,
+        detail: "ninguno informado",
+        warning: EMPTY_IN_TEST_WARNING,
+      };
+    }
+    return failedLayer("salesPoints", diagnose("salesPoint.none"));
   }
 
   return {

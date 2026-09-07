@@ -218,7 +218,11 @@ describe("runCheck file discovery", () => {
     const directory = directoryWith("test", VALID);
     writeFileSync(join(directory, "arca-production.crt"), VALID.certificatePem);
     writeFileSync(join(directory, "arca-production.key"), VALID.privateKeyPem);
-    const context = createContext({ env: {}, cwd: directory, salesPoints: [] });
+    const context = createContext({
+      env: {},
+      cwd: directory,
+      salesPoints: [{ number: 3, blocked: "N", emissionType: "CAE" }],
+    });
 
     expect(await run(context, { env: "production" })).toBe(0);
     expect(context.stdout()).toContain(
@@ -597,6 +601,45 @@ describe("runCheck sales points layer", () => {
     );
   });
 
+  it("fails when production reports none: nothing can be issued", async () => {
+    const context = createContext({
+      env: fullEnv({ ARCA_ENVIRONMENT: "production" }),
+      salesPoints: [],
+    });
+
+    expect(await run(context, {})).toBe(1);
+    expect(context.stdout()).toContain("✗ puntos de venta");
+    expect(context.stdout()).toContain(
+      "ARCA no informa ningún punto de venta para web services."
+    );
+    expect(context.stdout()).toContain(
+      "Administración de Puntos de Venta y Domicilios"
+    );
+    expect(context.stdout()).toContain("RECE para aplicativo y Web Services");
+    expect(context.stdout()).not.toContain("en homologación ARCA suele");
+  });
+
+  it("reports the failed production layer in --json", async () => {
+    const context = createContext({
+      env: fullEnv({ ARCA_ENVIRONMENT: "production" }),
+      salesPoints: [],
+    });
+
+    expect(await run(context, {}, true)).toBe(1);
+    const report = JSON.parse(context.stdout()) as {
+      ok: boolean;
+      salesPoints: unknown[];
+      layers: { name: string; ok: boolean; diagnosis?: string }[];
+    };
+    expect(report.ok).toBe(false);
+    expect(report.salesPoints).toEqual([]);
+    expect(report.layers.at(-1)).toMatchObject({
+      name: "salesPoints",
+      ok: false,
+      diagnosis: "ARCA no informa ningún punto de venta para web services.",
+    });
+  });
+
   it("fails when the requested point is not listed", async () => {
     const context = createContext({
       env: fullEnv(),
@@ -748,12 +791,12 @@ describe("runCheck --json", () => {
 
 type TestContext = ReturnType<typeof createContext>;
 
-function run(context: TestContext, flags: CheckFlags) {
+function run(context: TestContext, flags: CheckFlags, json = false) {
   return runCheck(
     context.io,
     flags,
     createWriter(context.io.stdout, { color: false }),
-    false
+    json
   );
 }
 

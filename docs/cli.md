@@ -270,7 +270,11 @@ Hay dos advertencias que no son fallas y mantienen el código de salida 0: un
 certificado que vence en menos de 30 días, y una lista de puntos de venta vacía
 en homologación, donde ARCA muchas veces no los informa aunque funcionen. En
 ese caso un `--sales-point` que no figura en la lista sale como
-`3 (no informado)` y `issue` puede seguir; en producción, sí es una falla.
+`3 (no informado)` y `issue` puede seguir.
+
+En producción no hay excepción: si ARCA no informa ningún punto de venta, no
+hay comprobante que puedas emitir, así que la capa falla y `check` sale con
+código 1.
 
 ### Diagnósticos
 
@@ -304,6 +308,7 @@ completa:
 | WSFE | `reason: authentication_rejected` | ARCA denegó el acceso al servicio. | Revisá entorno y relación del certificado. |
 | WSFE | otro error de servicio o SOAP fault | ARCA respondió con un error: `<mensaje>`. | — |
 | puntos de venta | el `--sales-point` no está en la lista | El punto de venta `<n>` no está habilitado para web services. | ARCA → `Administración de Puntos de Venta y Domicilios` → Nuevo → el sistema de web services de tu condición. |
+| puntos de venta | producción no informa ninguno | ARCA no informa ningún punto de venta para web services. | ARCA → `Administración de Puntos de Venta y Domicilios` → Nuevo → `RECE para aplicativo y Web Services` para responsable inscripto, `Factura Electrónica – Monotributo – Web Services` para monotributo. |
 | puntos de venta | está pero bloqueado | El punto de venta `<n>` está bloqueado. | Revisalo en ARCA. |
 
 Cualquier otro error sale con el mensaje seguro del SDK y su código estable.

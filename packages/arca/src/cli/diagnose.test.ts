@@ -127,6 +127,11 @@ const ROWS: [CliDiagnosisKey, string, string | undefined][] = [
     `ARCA → ${ARCA_PAGES.salesPoints} → Nuevo → el sistema de web services de tu condición ("${ARCA_PAGES.salesPointsSystem}" para responsable inscripto).`,
   ],
   [
+    "salesPoint.none",
+    "ARCA no informa ningún punto de venta para web services.",
+    `ARCA → ${ARCA_PAGES.salesPoints} → Nuevo → "${ARCA_PAGES.salesPointsSystem}" para responsable inscripto, "${ARCA_PAGES.salesPointsSystemMonotributo}" para monotributo.`,
+  ],
+  [
     "salesPoint.blocked",
     "El punto de venta {salesPoint} está bloqueado.",
     "Revisalo en ARCA.",

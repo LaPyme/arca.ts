@@ -29,6 +29,8 @@ export const ARCA_PAGES = {
   relationshipsPath: "Nueva Relación → Webservices → Facturación Electrónica",
   salesPoints: "Administración de Puntos de Venta y Domicilios",
   salesPointsSystem: "RECE para aplicativo y Web Services",
+  salesPointsSystemMonotributo:
+    "Factura Electrónica – Monotributo – Web Services",
 } as const;
 
 /** One printed line of the plan. `dim` ones are asides, never instructions. */
