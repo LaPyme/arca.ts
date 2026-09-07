@@ -13,6 +13,7 @@ prueba en homologación.
 - [Previsualizar antes de emitir](../examples/preview.ts)
 - [Nota de crédito parcial](../examples/nota-de-credito-parcial.ts)
 - [Nota de crédito total](../examples/nota-de-credito-total.ts)
+- [Emisión completa: tributos, FCE, WSMTXCA y notas](../examples/emision-completa.ts)
 
 ## Capa exacta
 

@@ -127,18 +127,18 @@ códigos.
 - Los métodos autenticados aceptan `forceRefresh: true` para renovar el TA WSAA
   de WSMTXCA antes de la llamada.
 
-WSMTXCA sigue soportado y exportado, pero este paquete pone hoy casi todo el
-foco editorial en WSFE y Padrón. Si necesitás `issue`,
+La fachada también emite por WSMTXCA, con detalle de ítems, cuando pasás
+`{ service: "wsmtxca" }`: ver [WSMTXCA](./wsmtxca.md). Esta capa exacta sigue
+disponible para armar el request completo vos mismo. Si necesitás `issue`,
 `getLastAuthorizedVoucher`, `lookupVoucher`, `getVoucher` o `getSalesPoints`, la
-API de runtime está disponible y cubierta por tests. El soporte de runtime es
-estable y público; simplemente no es el camino principal de documentación en
-esta pasada centrada en el SDK.
+API de runtime está disponible, es pública y está cubierta por tests.
 
 ## Emisión exacta y evidencia de recuperación
 
 `client.issue()` deriva el request de WSFE, reserva el número y recupera
-después de una caída por vos. Cuando necesitás algo que no deriva (tributos,
-FCE, un período asociado, una nota en otra moneda o a otro receptor) o la
+después de una caída por vos. Cuando necesitás algo que no deriva (una nota en
+otra moneda o a otro receptor, o cualquier campo fuera de la
+[superficie de la fachada](./facturas.md#datos-de-la-factura)) o la
 numeración es de tu aplicación, usá la capa exacta: `client.wsfe.issue(...)`
 manda un FECAESolicitar para un número de comprobante que reservaste vos de
 forma durable, y te dice si ese intento exacto quedó autorizado, rechazado o
@@ -197,7 +197,7 @@ El SDK normaliza solamente la evidencia de protocolo del proveedor. Tu
 aplicación sigue siendo responsable de persistir el request exacto, de ser
 dueña de su secuencia o carril, y de decidir cuándo un reintento es seguro.
 
-Para tributos, notas, FCE u otros casos avanzados, usá la salida de emergencia
+Para los campos fiscales que la fachada no expone, usá la salida de emergencia
 `WsfeVoucherInput`. También sigue soportando exenciones, importes no gravados y
 varias alícuotas de IVA. Los importes exactos siguen siendo números en unidades
 mayores, se validan localmente y se serializan como strings canónicos de dos

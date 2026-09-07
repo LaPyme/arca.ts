@@ -51,6 +51,13 @@ const nota = await arca.issueCreditNote(
 );
 ```
 
+The same facade also covers debit notes, period notes, tributes, reviewed
+fiscal breakdowns, the A con leyenda and FCE families, detailed WSMTXCA
+issuance through `{ service: "wsmtxca" }`, and `recover()`, which only consults
+a stored reservation and never authorizes. See
+[notas-de-credito.md](../notas-de-credito.md) and
+[wsmtxca.md](../wsmtxca.md).
+
 ## Outcomes
 
 | Outcome | Meaning and caller action |
@@ -66,7 +73,8 @@ const nota = await arca.issueCreditNote(
 | --- | --- |
 | [inicio-rapido.md](../inicio-rapido.md) | Quick start |
 | [facturas.md](../facturas.md) | `issue()`, `preview()`, invoice inputs, facade contract |
-| [notas-de-credito.md](../notas-de-credito.md) | `issueCreditNote()` |
+| [notas-de-credito.md](../notas-de-credito.md) | `issueCreditNote()`, `issueDebitNote()` |
+| [wsmtxca.md](../wsmtxca.md) | Detailed WSMTXCA issuance through the facade |
 | [stores.md](../stores.md) | Postgres, Redis, files, memory, custom store |
 | [configuracion.md](../configuracion.md) | Environment variables and client options |
 | [capa-exacta.md](../capa-exacta.md) | Exact WSFE / WSMTXCA layer and service surface |

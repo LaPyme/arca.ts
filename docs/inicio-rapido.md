@@ -131,11 +131,9 @@ Con `all: true` en lugar de `items` acreditás el total del original. El modo es
 explícito y obligatorio: sin `items` ni `all: true`, el SDK falla antes de
 cualquier llamada, así un campo olvidado nunca acredita la factura entera.
 
-La nota es una segunda operación; si falla, la factura sigue pendiente.
-`issueCreditNote()` admite facturas A, B y C en ARS o USD, sin tributos ni
-extensiones. La clase, el receptor, la moneda, el concepto y las fechas de
-servicio salen del original; vos aportás las líneas y, como mucho, el punto de
-venta y la fecha de la nota. Para períodos asociados, notas de débito u otros
-casos usá `wsfe.issue()`, en [Capa exacta](./capa-exacta.md).
-
-Las reglas completas están en [Notas de crédito](./notas-de-credito.md).
+La nota es una segunda operación; si falla, la factura sigue pendiente. La
+clase, el receptor, la moneda, el concepto y las fechas de servicio salen del
+original; vos aportás las líneas y, como mucho, el punto de venta y la fecha de
+la nota. La misma fachada emite notas de débito y notas por período: está todo
+en [Notas de crédito](./notas-de-credito.md). Si además necesitás detalle de
+ítems, el comprobante va por [WSMTXCA](./wsmtxca.md).

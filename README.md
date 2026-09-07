@@ -101,7 +101,9 @@ const nota = await arca.issueCreditNote(
 ```
 
 Con `all: true` acreditás el original completo. El modo es explícito y
-obligatorio. Ver [Notas de crédito](./docs/notas-de-credito.md).
+obligatorio. La misma fachada emite [notas de débito y por
+período](./docs/notas-de-credito.md), tributos, FCE, [detalle de ítems por
+WSMTXCA](./docs/wsmtxca.md) y `recover()`, que concilia sin emitir.
 
 ## Documentación
 

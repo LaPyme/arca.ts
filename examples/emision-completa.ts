@@ -1,6 +1,6 @@
 import type { createArcaClient, IssueInput } from "facturas";
 
-// Importable examples: importing this file does not make fiscal requests.
+// Ejemplos importables: importar este archivo no hace ninguna llamada fiscal.
 export async function issueReviewedSale(
   arca: ReturnType<typeof createArcaClient>
 ) {
@@ -8,11 +8,13 @@ export async function issueReviewedSale(
     issuer: "responsable_inscripto",
     salesPoint: 1,
     to: { condition: "responsable_inscripto", cuit: "20123456789" },
+    // Desglose fiscal ya revisado: el SDK no recalcula el IVA.
     amounts: {
-      net: 10_000,
+      net: 10_000, // ARS 100,00 en centavos
       vat: 2100,
       vatRates: [{ id: 5, base: 10_000, amount: 2100 }],
     },
+    // Los tributos suman al total y van aparte del desglose.
     taxes: [{ id: 2, description: "IIBB", base: 10_000, rate: 3, amount: 300 }],
     total: 12_400,
   } satisfies IssueInput;
@@ -28,6 +30,7 @@ export async function issueDetailedInvoice(
     salesPoint: 1,
     to: { condition: "responsable_inscripto", cuit: "20123456789" },
     items: [{ net: 10_000, vat: 21 }],
+    // unitPrice es la única excepción: string decimal en unidades mayores.
     details: [
       {
         description: "Product",
@@ -66,7 +69,8 @@ export async function issueAdjustments(
     },
     all: true as const,
   };
-  await arca.previewCreditNote(credit); // lookup only; does not reserve a number
+  // Consulta el original una vez; no reserva número ni escribe nada.
+  await arca.previewCreditNote(credit);
   return await arca.issueCreditNote(credit, {
     idempotencyKey: "credit:example",
   });
@@ -80,6 +84,7 @@ export function previewFce(arca: ReturnType<typeof createArcaClient>) {
     items: [{ net: 10_000, vat: 21 }],
     date: "2026-09-06",
     dueDate: "2026-10-01",
+    // FCE: el CBU de 22 dígitos y el vencimiento son obligatorios.
     fce: { cbu: "1234567890123456789012", transfer: "SCA" },
   });
 }

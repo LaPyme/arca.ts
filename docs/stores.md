@@ -88,6 +88,14 @@ reserva contienen el hash del input, la operación, las coordenadas reservadas y
 el input exacto enviado. Contienen datos fiscales y de clientes: restringí el
 acceso y protegé los backups.
 
+Cada registro lleva su versión. `v: 1` es una reserva de WSFE sin detalle y la
+lee cualquier versión desde la 0.9. `v: 2` es una reserva de WSMTXCA o con
+detalle de ítems: siempre nombra su proveedor, y la 0.10 no puede reproducirla,
+justamente para que un rollback no reenvíe por WSFE un comprobante que era de
+WSMTXCA. Preservá las dos versiones. Repetir una clave con otro input, otra
+operación, otro proveedor u otro `number` explícito es un mismatch de
+idempotencia y lanza `ARCA_INPUT_IDEMPOTENCY_MISMATCH`.
+
 **No podés borrar, vencer ni reescribir los registros de reserva.** El SDK solo
 los crea, nunca guarda resultados encima y siempre consulta a ARCA en una
 repetición. Borrar una reserva puede hacer que un reintento posterior emita

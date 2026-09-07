@@ -53,6 +53,17 @@ ejecución, siguen disponibles los métodos de WSFE como `getVoucherTypes()`,
 
 ## API pública (semver)
 
+Métodos del cliente cubiertos por semver: `issue`, `preview`, `recover`,
+`issueCreditNote`, `issueDebitNote`, `previewCreditNote`, `previewDebitNote`, y
+los módulos `wsfe`, `wsmtxca` y `padron`.
+
+Tipos exportados de la fachada, además de `IssueInput`, `IssueOptions`,
+`IssueOutcome`, `IssuePreview`, `IssuedVoucher` y `VouchersService`:
+`DebitNoteInput`, `PeriodNoteInput`, `PreviewOptions`, `RecoveryOptions`,
+`ExactIssueInput`, `IssuanceService`, `FceOptions`, `InvoiceFamily`,
+`IssuanceFields`, `Tribute`, `VoucherAmounts`, `VoucherItemDetail` y
+`WsmtxcaIssueRequest`.
+
 Entradas documentadas:
 
 - `facturas`

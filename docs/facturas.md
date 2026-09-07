@@ -56,6 +56,14 @@ frente a otros escritores.
 El ejemplo completo, con el tratamiento de los cuatro resultados, está en
 [examples/issue-invoice.ts](../examples/issue-invoice.ts).
 
+`recover(clave, opciones)` concilia sin emitir. Solo consulta la reserva
+guardada, con el proveedor y el número que quedaron registrados: nunca autoriza
+ni reserva un número nuevo. Si ARCA confirma que el número está vacío, el
+resultado es `indeterminate` con `lookup.kind === "not_found"`, no una
+autorización; para emitir se llama `issue()` con la misma clave. Si no hay
+reserva para esa clave, lanza `ArcaInputError`. Acepta `representedTaxId`,
+`forceRefresh` e `include`.
+
 ## Revisá antes de emitir
 
 `preview()` deriva exactamente lo que enviaría `issue()`, sin ninguna I/O: sin
@@ -101,9 +109,12 @@ if (factura.kind === "authorized") {
 
 `preview()` es sincrónico y devuelve la `voucherClass` derivada, el
 `voucherType`, los mismos `amounts` que informa un resultado autorizado, y
-`request`, el `WsfeVoucherInput` exacto que enviaría `issue()`. El número de
-comprobante no aparece porque recién se conoce cuando se reserva el número al
-emitir. Previsualizar una nota de crédito necesita el original y no se ofrece.
+`request`, el input exacto que enviaría `issue()`: un `WsfeVoucherInput`, o el
+request de WSMTXCA si pasás `{ service: "wsmtxca" }`. El número de comprobante
+no aparece porque recién se conoce cuando se reserva el número al emitir.
+Previsualizar una nota sí necesita el original, así que `previewCreditNote()` y
+`previewDebitNote()` son asincrónicas y hacen esa consulta; están en
+[Notas de crédito](./notas-de-credito.md#vista-previa-de-notas).
 
 ## Datos de la factura
 
@@ -143,6 +154,39 @@ Cuando el cliente pide el CUIT para deducir en Ganancias, informalo sin importar
 el monto. Los controles de forma del documento no verifican la inscripción ante
 el proveedor.
 
+`family` elige la familia del comprobante y por defecto es `"ordinary"`
+(1, 6, 11). `"retention_legend"` es A con leyenda y existe solo en clase A
+(51, 52, 53). `"fce"` es Factura de Crédito Electrónica MiPyME (201 a 213):
+requiere `dueDate` y `fce: { cbu, alias?, transfer?, reference? }`, con un CBU
+de 22 dígitos. ARCA valida la cuenta bancaria real y tu habilitación.
+
+`taxes` son tributos y percepciones. Cada fila es
+`{ id, description?, base, rate, amount }`, con `base` y `amount` en centavos y
+`rate` en porcentaje. Los tributos quedan fuera de la aritmética de los ítems y
+suman al total.
+
+`amounts` es un desglose fiscal ya revisado y es excluyente con `items`: el SDK
+no recalcula el IVA ni lo ajusta. Toma
+`{ net, vat, exempt?, untaxed?, vatRates? }` en centavos, con filas `vatRates`
+de la forma `{ id, base, amount }`. El `total` opcional afirma el total
+revisado: se controla contra las reglas de conciliación de importes del
+proveedor y no se reescribe en silencio.
+
+`concept: "products_and_services"` es el concepto 3, junto a `"products"` y
+`"services"`; `dueDate` informa el vencimiento de pago. `paidInForeignCurrency`
+marca la cancelación en la misma moneda extranjera y no se acepta en ARS. Para
+monedas que no son `ARS` ni `USD`, pasá `currency: { id: "060" }` con un
+`exchangeRate` explícito; ARCA controla la elegibilidad.
+
+`to.condition` también acepta el número de la condición de IVA del receptor del
+catálogo de ARCA, con `cuit`, `dni` o `document: { type, number }`. Los campos
+`optionalFields`, `buyers` y `activities` pasan tal cual a WSFE y a WSMTXCA; no
+dupliques ahí lo que ya informa `fce`.
+
+Para el detalle de ítems de WSMTXCA, mirá [WSMTXCA](./wsmtxca.md). El ejemplo
+compilado de todo esto es
+[examples/emision-completa.ts](../examples/emision-completa.ts).
+
 ## Contrato fiscal de la fachada
 
 Sin clave, una llamada lee un próximo número y autoriza una vez, con a lo sumo
@@ -163,15 +207,26 @@ crea una reserva nueva.
 | `conflict` | Hay otro comprobante en el número reservado. Detené el flujo e investigá. |
 
 El segundo argumento acepta `idempotencyKey`, `representedTaxId`,
-`forceRefresh` e `include: { raw: true, exactInput: true }`. Los resultados no
-traen la evidencia cruda por defecto; `sent` se incluye solo en resultados
-autorizados y solo si lo pedís. Una repetición sin un resultado de escritura
-observado usa un intento indeterminado con `reason: "incomplete_response"`; la
-consulta aporta la evidencia de autorización.
+`forceRefresh`, `service`, `number` e
+`include: { raw: true, exactInput: true }`.
+Los resultados no traen la evidencia cruda por defecto; `sent` se incluye solo
+en resultados autorizados y solo si lo pedís. Una repetición sin un resultado
+de escritura observado usa un intento indeterminado con
+`reason: "incomplete_response"`; la consulta aporta la evidencia de
+autorización.
+
+`service` elige el proveedor: `"wsfe"` por defecto, `"wsmtxca"` para el detalle
+de ítems. Nunca cambia solo. `number` es un número reservado por fuera: cuando
+lo pasás, la llamada no lee el próximo número, así que la aplicación sigue
+siendo dueña de la secuencia del punto de venta.
+
+La fachada cubre la emisión de CAE de facturas y notas. CAEA, exportación y
+los demás servicios de ARCA no están cubiertos por ella.
 
 El comparador de identidad compara coordenadas, fecha, concepto, receptor,
-moneda, todos los importes de cabecera, alícuotas de IVA, fechas de servicio y
-asociaciones de notas. Los campos faltantes quedan incompletos; las diferencias
-son conflictos. Las extensiones exactas no soportadas quedan incompletas. Usá
-las APIs exactas para tributos, FCE, otras condiciones de receptor, anulación
-en moneda extranjera con la misma moneda y WSMTXCA.
+moneda, todos los importes de cabecera, alícuotas de IVA, fechas de servicio,
+tributos, campos opcionales, compradores, actividades, las asociaciones de
+notas (incluidos el CUIT emisor y la fecha informados) y el flag de pago en
+moneda extranjera. Los campos faltantes quedan incompletos y nunca cuentan como
+prueba de coincidencia; las diferencias son conflictos. Las extensiones exactas
+fuera de ese conjunto quedan incompletas.
