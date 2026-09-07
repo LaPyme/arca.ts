@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { ArcaClient } from "../client";
 import {
-  ARCA_ENVIRONMENTS,
   ARCA_WSAA_CONFIG,
   assertArcaClientConfig,
   discoverArcaClientConfig,
@@ -517,9 +516,4 @@ function failedLayer(
 
 function toIsoDate(value: Date): string {
   return value.toISOString().slice(0, 10);
-}
-
-/** Exposed for `issue`, which validates the environment before running. */
-export function isKnownEnvironment(value: string): value is ArcaEnvironment {
-  return ARCA_ENVIRONMENTS.includes(value as ArcaEnvironment);
 }

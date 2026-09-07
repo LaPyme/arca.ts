@@ -22,19 +22,3 @@ export async function ask(io: CliIo, question: string): Promise<string> {
     rl.close();
   }
 }
-
-/** Asks until the answer passes, or gives up after a few tries. */
-export async function askUntil(
-  io: CliIo,
-  question: string,
-  isValid: (answer: string) => boolean,
-  attempts = 3
-): Promise<string | undefined> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const answer = await ask(io, question);
-    if (isValid(answer)) {
-      return answer;
-    }
-  }
-  return undefined;
-}

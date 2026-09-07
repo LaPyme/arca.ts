@@ -19,6 +19,13 @@ const ISSUER_CONDITIONS = [
 
 type IssuerCondition = (typeof ISSUER_CONDITIONS)[number];
 
+/**
+ * The smoke test always builds an items input, never the reviewed-amounts one,
+ * so `items` is present and the printed call can read it without a guard.
+ */
+type SmokeTestItem = { gross: number; vat: number } | { amount: number };
+type SmokeTestInput = IssueInput & { items: readonly SmokeTestItem[] };
+
 export type IssueFlags = CheckFlags & {
   issuer?: string;
 };
@@ -127,7 +134,7 @@ function toIssuerCondition(value: string): IssuerCondition | undefined {
 export function buildSmokeTestInput(
   issuer: IssuerCondition,
   salesPoint: number
-): IssueInput {
+): SmokeTestInput {
   if (issuer === "responsable_inscripto") {
     return {
       issuer,
@@ -147,7 +154,7 @@ export function buildSmokeTestInput(
 function writeOutcome(
   writer: CliWriter,
   outcome: IssueOutcome,
-  input: IssueInput
+  input: SmokeTestInput
 ): number {
   if (outcome.kind === "authorized") {
     writer.ok(describeVoucher(outcome.voucher));
@@ -220,7 +227,7 @@ export function formatMinorUnits(minorUnits: number): string {
 }
 
 /** Prints the exact call, so the smoke test doubles as the first snippet. */
-function writeIssueCall(writer: CliWriter, input: IssueInput): void {
+function writeIssueCall(writer: CliWriter, input: SmokeTestInput): void {
   writer.blank();
   writer.line("Esta es la llamada que hizo el CLI. Pegala en tu aplicación:");
   writer.blank();
@@ -232,7 +239,7 @@ function writeIssueCall(writer: CliWriter, input: IssueInput): void {
   writer.line("  });");
 }
 
-function formatItem(item: IssueInput["items"][number]): string {
+function formatItem(item: SmokeTestItem): string {
   const fields = Object.entries(item)
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `${key}: ${String(value)}`);
