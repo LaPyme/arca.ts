@@ -16,9 +16,9 @@ describe("ask", () => {
     const { io, stdin, prompts } = createIo(true);
 
     const answer = ask(io, "CUIT: ");
-    stdin.write("  20123456789  \n");
+    stdin.write("  20123456786  \n");
 
-    expect(await answer).toBe("20123456789");
+    expect(await answer).toBe("20123456786");
     expect(prompts()).toContain("CUIT: ");
   });
 });

@@ -53,14 +53,29 @@ ARCA. El subject es el que pide el instructivo oficial:
 literal después de `CUIT`.
 
 ```sh
-npx facturas init --cuit 20123456789 --env test
+npx facturas init --cuit 20123456786 --env test
 ```
 
 Sin flags y en una terminal, pregunta el CUIT y el entorno.
 
+El CUIT se valida antes de escribir nada: 11 dígitos y el dígito verificador
+de módulo 11, el mismo que usa ARCA. Podés escribirlo con guiones o con
+espacios, `20-12345678-6` o `20 12345678 6`; el CSR lleva solo los dígitos. Un
+CUIT equivocado se nombra como equivocado, con lo que recibió y por qué:
+
+```
+CUIT inválido: 2043809618 tiene 10 dígitos y necesita 11.
+CUIT inválido: 20123456789 no pasa el dígito verificador.
+```
+
+En una terminal vuelve a preguntar con esa razón, hasta tres veces, y recién
+ahí sale con código 2. Sin terminal sale con código 2 en el primer intento. La
+misma validación corre en `--tax-id` y en `ARCA_TAX_ID` para `check` e
+`issue`.
+
 | Flag | Por defecto | Qué hace |
 | --- | --- | --- |
-| `--cuit <cuit>` | pregunta | CUIT de 11 dígitos |
+| `--cuit <cuit>` | pregunta | CUIT de 11 dígitos, con o sin guiones |
 | `--env <test\|production>` | pregunta | Entorno de destino |
 | `--name <alias>` | `facturas` | Common name del CSR |
 | `--org <razón social>` | el CUIT | Organización del CSR |
@@ -100,7 +115,7 @@ primero, y los flags ganan. Prueba las capas en orden y para en la primera que
 falla.
 
 ```sh
-export ARCA_TAX_ID=20123456789
+export ARCA_TAX_ID=20123456786
 export ARCA_ENVIRONMENT=test
 export ARCA_CERTIFICATE_PEM="$(cat arca-test.crt)"
 export ARCA_PRIVATE_KEY_PEM="$(cat arca-test.key)"
@@ -148,7 +163,8 @@ completa:
 
 | Capa | Caso | Diagnóstico | Solución |
 | --- | --- | --- | --- |
-| variables de entorno | falta `ARCA_TAX_ID` | Falta el CUIT. | `export ARCA_TAX_ID=20123456789` |
+| variables de entorno | falta `ARCA_TAX_ID` | Falta el CUIT. | `export ARCA_TAX_ID=20123456786` |
+| variables de entorno | `ARCA_TAX_ID` o `--tax-id` inválido | CUIT inválido: `<cuit>` tiene `<n>` dígitos y necesita 11. / CUIT inválido: `<cuit>` no pasa el dígito verificador. | Son 11 dígitos y el último es el verificador; podés escribirlo con guiones. |
 | variables de entorno | falta `ARCA_ENVIRONMENT` | Falta el entorno. | `export ARCA_ENVIRONMENT=test` |
 | variables de entorno | falta un PEM | Falta el certificado o la clave. | Pasá `--cert` y `--key`, o definí `ARCA_CERTIFICATE_PEM` y `ARCA_PRIVATE_KEY_PEM`. |
 | certificado y clave | el PEM no parsea | El archivo no es un PEM válido. | Revisá que copiaste el bloque completo, con BEGIN y END. |
@@ -181,7 +197,7 @@ las que no llegó no aparecen.
 {
   "ok": false,
   "environment": "test",
-  "taxId": "20123456789",
+  "taxId": "20123456786",
   "layers": [
     { "name": "env", "ok": true, "detail": "ARCA_TAX_ID, ARCA_ENVIRONMENT=test" },
     { "name": "certificate", "ok": true, "detail": "coinciden, vence 2027-09-05", "expiresAt": "2027-09-05" },

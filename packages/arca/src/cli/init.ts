@@ -3,12 +3,18 @@ import { isAbsolute, resolve } from "node:path";
 import { ARCA_ENVIRONMENTS } from "../config";
 import type { ArcaEnvironment } from "../internal/types";
 import { createArcaCsrMaterial } from "./csr";
+import { describeTaxIdProblem, normalizeTaxId } from "./cuit";
 import { ARCA_PAGES } from "./diagnose";
 import { CLI_EXIT, type CliIo, type CliWriter } from "./output";
 import { ask, isInteractive } from "./prompt";
 
-const TAX_ID_PATTERN = /^\d{11}$/;
 const KEY_FILE_MODE = 0o600;
+/** Three tries at the prompt before the CLI gives up and says why. */
+const TAX_ID_ATTEMPTS = 3;
+const MISSING_TAX_ID =
+  "Falta el CUIT. Pasá --cuit 20123456786 o ejecutá init en una terminal.";
+const MISSING_ENVIRONMENT =
+  "Falta el entorno. Pasá --env test o --env production.";
 const GITIGNORE_PATTERNS = ["arca-*.key", "arca-*.crt"] as const;
 
 export type InitFlags = {
@@ -85,36 +91,58 @@ async function resolveInitInput(
 ): Promise<{ taxId: string; environment: ArcaEnvironment } | undefined> {
   const interactive = isInteractive(io);
   const taxId = await resolveTaxId(io, flags, interactive);
-  if (taxId === undefined) {
-    io.stderr.write(
-      "Falta el CUIT. Pasá --cuit 20123456789 o ejecutá init en una terminal.\n"
-    );
+  if ("error" in taxId) {
+    io.stderr.write(`${taxId.error}\n`);
     return undefined;
   }
 
   const environment = await resolveEnvironment(io, flags, interactive);
   if (environment === undefined) {
-    io.stderr.write("Falta el entorno. Pasá --env test o --env production.\n");
+    io.stderr.write(`${MISSING_ENVIRONMENT}\n`);
     return undefined;
   }
 
-  return { taxId, environment };
+  return { taxId: taxId.taxId, environment };
 }
 
+/**
+ * A CUIT that is absent and one that is wrong are different problems, and the
+ * message has to say which. On a terminal a wrong answer is worth another try:
+ * the reason goes back to the user and the question is asked again.
+ */
 async function resolveTaxId(
   io: CliIo,
   flags: InitFlags,
   interactive: boolean
-): Promise<string | undefined> {
+): Promise<{ taxId: string } | { error: string }> {
   const fromFlag = flags.cuit?.trim();
   if (fromFlag !== undefined && fromFlag !== "") {
-    return TAX_ID_PATTERN.test(fromFlag) ? fromFlag : undefined;
+    const problem = describeTaxIdProblem(fromFlag);
+    return problem === undefined
+      ? { taxId: normalizeTaxId(fromFlag) }
+      : { error: problem };
   }
   if (!interactive) {
-    return undefined;
+    return { error: MISSING_TAX_ID };
   }
-  const answer = await ask(io, "CUIT: ");
-  return TAX_ID_PATTERN.test(answer) ? answer : undefined;
+
+  let problem = MISSING_TAX_ID;
+  for (let attempt = 1; attempt <= TAX_ID_ATTEMPTS; attempt += 1) {
+    const answer = await ask(io, "CUIT: ");
+    if (answer === "") {
+      problem = MISSING_TAX_ID;
+    } else {
+      const invalid = describeTaxIdProblem(answer);
+      if (invalid === undefined) {
+        return { taxId: normalizeTaxId(answer) };
+      }
+      problem = invalid;
+    }
+    if (attempt < TAX_ID_ATTEMPTS) {
+      io.stderr.write(`${problem}\n`);
+    }
+  }
+  return { error: problem };
 }
 
 async function resolveEnvironment(

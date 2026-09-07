@@ -8,7 +8,7 @@ web services. Homologación y producción tienen certificados y puntos de venta
 propios. El SDK no hace estas habilitaciones por vos, pero el CLI te acompaña:
 
 ```sh
-npx facturas init --cuit 20123456789 --env test
+npx facturas init --cuit 20123456786 --env test
 ```
 
 Genera la clave privada y el CSR que se sube en ARCA, y después imprime los

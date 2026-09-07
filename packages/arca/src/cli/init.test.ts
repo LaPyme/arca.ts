@@ -26,7 +26,7 @@ describe("runInit", () => {
 
     const code = await runInit(
       io,
-      { cuit: "20123456789", env: "test", dir: directory },
+      { cuit: "20123456786", env: "test", dir: directory },
       createWriter(io.stdout, { color: false })
     );
 
@@ -55,7 +55,7 @@ describe("runInit", () => {
 
       Cuando tengas el certificado:
 
-        export ARCA_TAX_ID=20123456789
+        export ARCA_TAX_ID=20123456786
         export ARCA_ENVIRONMENT=test
         export ARCA_CERTIFICATE_PEM="$(cat arca-test.crt)"
         export ARCA_PRIVATE_KEY_PEM="$(cat arca-test.key)"
@@ -71,7 +71,7 @@ describe("runInit", () => {
 
       await runInit(
         io,
-        { cuit: "20123456789", env: "test", dir: directory },
+        { cuit: "20123456786", env: "test", dir: directory },
         createWriter(io.stdout, { color: false })
       );
 
@@ -86,7 +86,7 @@ describe("runInit", () => {
 
     await runInit(
       io,
-      { cuit: "20123456789", env: "production", dir: directory },
+      { cuit: "20123456786", env: "production", dir: directory },
       createWriter(io.stdout, { color: false })
     );
 
@@ -101,7 +101,7 @@ describe("runInit", () => {
 
     const code = await runInit(
       io,
-      { cuit: "20123456789", env: "test", dir: directory },
+      { cuit: "20123456786", env: "test", dir: directory },
       createWriter(io.stdout, { color: false })
     );
 
@@ -118,7 +118,7 @@ describe("runInit", () => {
 
     const code = await runInit(
       io,
-      { cuit: "20123456789", env: "test", dir: directory, force: true },
+      { cuit: "20123456786", env: "test", dir: directory, force: true },
       createWriter(io.stdout, { color: false })
     );
 
@@ -134,7 +134,7 @@ describe("runInit", () => {
 
     await runInit(
       io,
-      { cuit: "20123456789", env: "test", dir: directory },
+      { cuit: "20123456786", env: "test", dir: directory },
       createWriter(io.stdout, { color: false })
     );
     expect(readFileSync(join(directory, ".gitignore"), "utf8")).toBe(
@@ -144,7 +144,7 @@ describe("runInit", () => {
 
     await runInit(
       io,
-      { cuit: "20123456789", env: "test", dir: directory, force: true },
+      { cuit: "20123456786", env: "test", dir: directory, force: true },
       createWriter(io.stdout, { color: false })
     );
     expect(readFileSync(join(directory, ".gitignore"), "utf8")).toBe(
@@ -157,7 +157,7 @@ describe("runInit", () => {
 
     await runInit(
       io,
-      { cuit: "20123456789", env: "test", dir: directory },
+      { cuit: "20123456786", env: "test", dir: directory },
       createWriter(io.stdout, { color: false })
     );
 
@@ -170,7 +170,7 @@ describe("runInit", () => {
     await runInit(
       io,
       {
-        cuit: "20123456789",
+        cuit: "20123456786",
         env: "test",
         dir: directory,
         name: "mi-sistema",
@@ -201,7 +201,7 @@ describe("runInit", () => {
 
     const code = await runInit(
       io,
-      { cuit: "20123456789", dir: directory },
+      { cuit: "20123456786", dir: directory },
       createWriter(io.stdout, { color: false })
     );
 
@@ -217,7 +217,7 @@ describe("runInit", () => {
       { dir: context.directory },
       createWriter(context.io.stdout, { color: false })
     );
-    context.stdin.write("20123456789\n");
+    context.stdin.write("20123456786\n");
     await waitFor(() => context.prompts().includes("Entorno"));
     context.stdin.write("test\n");
 
@@ -229,7 +229,7 @@ describe("runInit", () => {
     ).toContain("CERTIFICATE REQUEST");
   });
 
-  it("exits 2 when the answered CUIT is not eleven digits", async () => {
+  it("asks again, with the reason, when the answered CUIT is wrong", async () => {
     const context = createTestIo({ tty: true });
 
     const running = runInit(
@@ -238,9 +238,39 @@ describe("runInit", () => {
       createWriter(context.io.stdout, { color: false })
     );
     context.stdin.write("123\n");
+    await waitFor(() => context.stderr().includes("3 dígitos"));
+    context.stdin.write("20-12345678-6\n");
+    await waitFor(() => context.prompts().includes("Entorno"));
+    context.stdin.write("test\n");
+
+    expect(await running).toBe(0);
+    expect(context.stderr()).toBe(
+      "CUIT inválido: 123 tiene 3 dígitos y necesita 11.\n"
+    );
+    expect(
+      readFileSync(join(context.directory, "arca-test.csr"), "utf8")
+    ).toContain("CERTIFICATE REQUEST");
+  });
+
+  it("gives up after three wrong answers, naming the last reason", async () => {
+    const context = createTestIo({ tty: true });
+
+    const running = runInit(
+      context.io,
+      { dir: context.directory },
+      createWriter(context.io.stdout, { color: false })
+    );
+    context.stdin.write("123\n");
+    await waitFor(() => context.stderr().includes("3 dígitos"));
+    context.stdin.write("\n");
+    await waitFor(() => context.stderr().includes("Falta el CUIT."));
+    context.stdin.write("20123456789\n");
 
     expect(await running).toBe(2);
-    expect(context.stderr()).toContain("Falta el CUIT.");
+    expect(context.stderr()).toContain(
+      "CUIT inválido: 20123456789 no pasa el dígito verificador."
+    );
+    expect(context.prompts().split("CUIT: ").length - 1).toBe(3);
   });
 
   it("exits 2 when the answered environment is not one ARCA has", async () => {
@@ -248,7 +278,7 @@ describe("runInit", () => {
 
     const running = runInit(
       context.io,
-      { cuit: "20123456789", dir: context.directory },
+      { cuit: "20123456786", dir: context.directory },
       createWriter(context.io.stdout, { color: false })
     );
     await waitFor(() => context.prompts().includes("Entorno"));
@@ -258,17 +288,50 @@ describe("runInit", () => {
     expect(context.stderr()).toContain("Falta el entorno.");
   });
 
-  it("rejects a CUIT that is not eleven digits", async () => {
+  it("says a short CUIT is wrong, not missing", async () => {
     const { io, directory, stderr } = createTestIo();
 
     const code = await runInit(
       io,
-      { cuit: "123", env: "test", dir: directory },
+      { cuit: "2043809618", env: "test", dir: directory },
       createWriter(io.stdout, { color: false })
     );
 
     expect(code).toBe(2);
-    expect(stderr()).toContain("Falta el CUIT.");
+    expect(stderr()).toBe(
+      "CUIT inválido: 2043809618 tiene 10 dígitos y necesita 11.\n"
+    );
+  });
+
+  it("says a CUIT that fails its check digit is wrong, not missing", async () => {
+    const { io, directory, stderr } = createTestIo();
+
+    const code = await runInit(
+      io,
+      { cuit: "20123456789", env: "test", dir: directory },
+      createWriter(io.stdout, { color: false })
+    );
+
+    expect(code).toBe(2);
+    expect(stderr()).toBe(
+      "CUIT inválido: 20123456789 no pasa el dígito verificador.\n"
+    );
+  });
+
+  it("accepts a CUIT written with hyphens and stores it without them", async () => {
+    const { io, directory, stdout } = createTestIo();
+
+    const code = await runInit(
+      io,
+      { cuit: "20-12345678-6", env: "test", dir: directory },
+      createWriter(io.stdout, { color: false })
+    );
+
+    expect(code).toBe(0);
+    expect(stdout()).toContain("20123456786");
+    expect(readFileSync(join(directory, "arca-test.csr"), "utf8")).toContain(
+      "CERTIFICATE REQUEST"
+    );
   });
 
   it("rejects an environment ARCA does not have", async () => {
@@ -276,7 +339,7 @@ describe("runInit", () => {
 
     const code = await runInit(
       io,
-      { cuit: "20123456789", env: "staging", dir: directory },
+      { cuit: "20123456786", env: "staging", dir: directory },
       createWriter(io.stdout, { color: false })
     );
 

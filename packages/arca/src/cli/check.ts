@@ -22,6 +22,7 @@ import type { WsfeSalesPoint } from "../services/wsfe";
 import { createFileStore } from "../store/file";
 import { createWsaaStoreAdapter } from "../wsaa/store-adapter";
 import { privateKeyMatchesCertificate, readCertificateFacts } from "./csr";
+import { describeTaxIdProblem, normalizeTaxId, TAX_ID_FIX } from "./cuit";
 import {
   type CliDiagnosis,
   describeUnknownError,
@@ -215,6 +216,12 @@ function resolveConfigLayer(
   if (!taxId) {
     return { layer: failedLayer("env", diagnose("config.taxId")) };
   }
+  const invalidTaxId = describeTaxIdProblem(taxId);
+  if (invalidTaxId !== undefined) {
+    return {
+      layer: failedLayer("env", { diagnosis: invalidTaxId, fix: TAX_ID_FIX }),
+    };
+  }
 
   const environment =
     flags.env?.trim().toLowerCase() || io.env.ARCA_ENVIRONMENT?.trim();
@@ -240,7 +247,7 @@ function resolveConfigLayer(
 
   try {
     const config = discoverArcaClientConfig({
-      taxId,
+      taxId: normalizeTaxId(taxId),
       certificatePem,
       privateKeyPem,
       environment: environment as ArcaEnvironment,

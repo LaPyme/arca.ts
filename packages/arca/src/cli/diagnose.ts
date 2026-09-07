@@ -67,7 +67,7 @@ export type CliDiagnosisValues = {
 export const CLI_DIAGNOSES: Record<CliDiagnosisKey, CliDiagnosis> = {
   "config.taxId": {
     diagnosis: "Falta el CUIT.",
-    fix: "export ARCA_TAX_ID=20123456789",
+    fix: "export ARCA_TAX_ID=20123456786",
   },
   "config.environment": {
     diagnosis: "Falta el entorno.",

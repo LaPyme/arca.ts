@@ -8,7 +8,7 @@ import {
 } from "./csr";
 
 const SUBJECT = {
-  taxId: "20123456789",
+  taxId: "20123456786",
   commonName: "facturas",
   organization: "Prueba SRL",
 };
@@ -21,13 +21,13 @@ describe("buildArcaCsrSubject", () => {
       { name: "countryName", value: "AR" },
       { name: "organizationName", value: "Prueba SRL" },
       { name: "commonName", value: "facturas" },
-      { name: "serialNumber", value: "CUIT 20123456789" },
+      { name: "serialNumber", value: "CUIT 20123456786" },
     ]);
   });
 
   it("writes CUIT, one space and the eleven digits", () => {
     const serial = buildArcaCsrSubject(SUBJECT).at(-1);
-    expect(serial?.value).toBe("CUIT 20123456789");
+    expect(serial?.value).toBe("CUIT 20123456786");
   });
 });
 
@@ -55,7 +55,7 @@ describe("createArcaCsrMaterial", () => {
       ["countryName", "AR"],
       ["organizationName", "Prueba SRL"],
       ["commonName", "facturas"],
-      ["serialNumber", "CUIT 20123456789"],
+      ["serialNumber", "CUIT 20123456786"],
     ]);
   });
 

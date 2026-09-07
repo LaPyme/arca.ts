@@ -61,7 +61,7 @@ const HELP_PAGES: Record<CliHelpTopic, HelpPage> = {
       },
     ],
     examples: [
-      "npx facturas init --cuit 20123456789 --env test",
+      "npx facturas init --cuit 20123456786 --env test",
       "npx facturas check",
       "npx facturas issue --sales-point 3 --issuer monotributo",
     ],
@@ -73,7 +73,10 @@ const HELP_PAGES: Record<CliHelpTopic, HelpPage> = {
       {
         title: "Opciones:",
         rows: [
-          { name: "--cuit <cuit>", description: "CUIT de 11 dígitos" },
+          {
+            name: "--cuit <cuit>",
+            description: "CUIT de 11 dígitos, con o sin guiones",
+          },
           {
             name: "--env <test|production>",
             description: "entorno de destino",
@@ -100,8 +103,8 @@ const HELP_PAGES: Record<CliHelpTopic, HelpPage> = {
       },
     ],
     examples: [
-      "npx facturas init --cuit 20123456789 --env test",
-      "npx facturas init --cuit 20-12345678-9 --env production --name mi-sistema",
+      "npx facturas init --cuit 20123456786 --env test",
+      "npx facturas init --cuit 20-12345678-6 --env production --name mi-sistema",
     ],
     notes: [
       "Escribe arca-<entorno>.key con permisos 0600 y arca-<entorno>.csr, y",

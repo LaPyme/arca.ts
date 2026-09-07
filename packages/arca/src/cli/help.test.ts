@@ -38,7 +38,7 @@ describe("renderHelp without color", () => {
 
       Ejemplos:
 
-        $ npx facturas init --cuit 20123456789 --env test
+        $ npx facturas init --cuit 20123456786 --env test
         $ npx facturas check
         $ npx facturas issue --sales-point 3 --issuer monotributo
       "
@@ -55,7 +55,7 @@ describe("renderHelp without color", () => {
 
       Opciones:
 
-        --cuit <cuit>             CUIT de 11 dígitos
+        --cuit <cuit>             CUIT de 11 dígitos, con o sin guiones
         --env <test|production>   entorno de destino
         --name <alias>            common name del CSR (por defecto: facturas)
         --org <razón social>      organización del CSR (por defecto: el CUIT)
@@ -66,8 +66,8 @@ describe("renderHelp without color", () => {
 
       Ejemplos:
 
-        $ npx facturas init --cuit 20123456789 --env test
-        $ npx facturas init --cuit 20-12345678-9 --env production --name mi-sistema
+        $ npx facturas init --cuit 20123456786 --env test
+        $ npx facturas init --cuit 20-12345678-6 --env production --name mi-sistema
 
       Notas:
 

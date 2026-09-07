@@ -54,13 +54,13 @@ describe("runCheck env layer", () => {
     expect(context.stdout()).toMatchInlineSnapshot(`
       "✗ variables de entorno
         Falta el CUIT.
-        export ARCA_TAX_ID=20123456789
+        export ARCA_TAX_ID=20123456786
       "
     `);
   });
 
   it("names the missing environment", async () => {
-    const context = createContext({ env: { ARCA_TAX_ID: "20123456789" } });
+    const context = createContext({ env: { ARCA_TAX_ID: "20123456786" } });
 
     expect(await run(context, {})).toBe(1);
     expect(context.stdout()).toContain("Falta el entorno.");
@@ -69,18 +69,41 @@ describe("runCheck env layer", () => {
 
   it("names the missing PEMs", async () => {
     const context = createContext({
-      env: { ARCA_TAX_ID: "20123456789", ARCA_ENVIRONMENT: "test" },
+      env: { ARCA_TAX_ID: "20123456786", ARCA_ENVIRONMENT: "test" },
     });
 
     expect(await run(context, {})).toBe(1);
     expect(context.stdout()).toContain("Falta el certificado o la clave.");
   });
 
-  it("rejects a CUIT that is not eleven digits", async () => {
+  it("says a CUIT that is not eleven digits is wrong, not missing", async () => {
     const context = createContext({ env: fullEnv({ ARCA_TAX_ID: "123" }) });
 
     expect(await run(context, {})).toBe(1);
-    expect(context.stdout()).toContain("Falta el CUIT.");
+    expect(context.stdout()).toMatchInlineSnapshot(`
+      "✗ variables de entorno
+        CUIT inválido: 123 tiene 3 dígitos y necesita 11.
+        Son 11 dígitos y el último es el verificador; podés escribirlo con guiones.
+      "
+    `);
+  });
+
+  it("rejects a --tax-id that fails its check digit", async () => {
+    const context = createContext({ env: fullEnv() });
+
+    expect(await run(context, { taxId: "20123456789" })).toBe(1);
+    expect(context.stdout()).toContain(
+      "CUIT inválido: 20123456789 no pasa el dígito verificador."
+    );
+  });
+
+  it("accepts a CUIT written with hyphens", async () => {
+    const context = createContext({
+      env: fullEnv({ ARCA_TAX_ID: "20-12345678-6" }),
+      salesPoints: [],
+    });
+
+    expect(await run(context, {})).toBe(0);
   });
 
   it("rejects an environment ARCA does not have", async () => {
@@ -97,7 +120,7 @@ describe("runCheck env layer", () => {
     writeFileSync(join(directory, "arca.crt"), VALID.certificatePem);
     writeFileSync(join(directory, "arca.key"), VALID.privateKeyPem);
     const context = createContext({
-      env: { ARCA_TAX_ID: "20123456789", ARCA_ENVIRONMENT: "test" },
+      env: { ARCA_TAX_ID: "20123456786", ARCA_ENVIRONMENT: "test" },
       salesPoints: [{ number: 3, blocked: "N", emissionType: "CAE" }],
     });
 
@@ -112,7 +135,7 @@ describe("runCheck env layer", () => {
 
   it("reports a file it cannot read with the SDK's safe message", async () => {
     const context = createContext({
-      env: { ARCA_TAX_ID: "20123456789", ARCA_ENVIRONMENT: "test" },
+      env: { ARCA_TAX_ID: "20123456786", ARCA_ENVIRONMENT: "test" },
     });
 
     expect(await run(context, { cert: "/no/existe.crt" })).toBe(1);
@@ -128,7 +151,7 @@ describe("runCheck env layer", () => {
       salesPoints: [],
     });
 
-    await run(context, { taxId: "20123456789", env: "test" });
+    await run(context, { taxId: "20123456786", env: "test" });
 
     expect(context.stdout()).toContain("--tax-id, --env=test");
   });
@@ -494,7 +517,7 @@ describe("runCheck --json", () => {
     expect(JSON.parse(context.stdout())).toEqual({
       ok: false,
       environment: "test",
-      taxId: "20123456789",
+      taxId: "20123456786",
       layers: [
         {
           name: "env",
@@ -573,7 +596,7 @@ function run(context: TestContext, flags: CheckFlags) {
 
 function fullEnv(overrides: Record<string, string> = {}) {
   return {
-    ARCA_TAX_ID: "20123456789",
+    ARCA_TAX_ID: "20123456786",
     ARCA_ENVIRONMENT: "test",
     ARCA_CERTIFICATE_PEM: VALID.certificatePem,
     ARCA_PRIVATE_KEY_PEM: VALID.privateKeyPem,

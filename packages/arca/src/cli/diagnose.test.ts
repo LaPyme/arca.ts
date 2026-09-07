@@ -18,7 +18,7 @@ import {
 
 /** Every published row, asserted one by one. This is the contract. */
 const ROWS: [CliDiagnosisKey, string, string | undefined][] = [
-  ["config.taxId", "Falta el CUIT.", "export ARCA_TAX_ID=20123456789"],
+  ["config.taxId", "Falta el CUIT.", "export ARCA_TAX_ID=20123456786"],
   ["config.environment", "Falta el entorno.", "export ARCA_ENVIRONMENT=test"],
   [
     "config.pem",
