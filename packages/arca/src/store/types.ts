@@ -12,8 +12,14 @@ export type ArcaStore = {
   withLock?<T>(key: string, fn: () => Promise<T>): Promise<T>;
 };
 
+/**
+ * Reservation record. Version 1 is a plain WSFE reservation, readable by every
+ * release since 0.9. Version 2 carries a WSMTXCA provider or detailed items and
+ * always names its `service`, so an older reader refuses it instead of
+ * replaying a WSMTXCA reservation through WSFE.
+ */
 export type ArcaAttemptRecord = {
-  v: 1;
+  v: 1 | 2;
   operation: "issue" | "creditNote" | "debitNote";
   service?: "wsfe" | "wsmtxca";
   representedTaxId?: string;

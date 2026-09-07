@@ -26,10 +26,7 @@ export type IssuedVoucher = VoucherCoordinates & {
   amounts: IssueAmounts;
 };
 
-/**
- * What issue() would send, derived with zero I/O. The voucher number is absent
- * because it is only known when the number is reserved at issuance.
- */
+/** The provider a call targets. It is chosen explicitly, never switched. */
 export type IssuanceService = "wsfe" | "wsmtxca";
 export type ServiceFor<O extends IssueOptions> = "service" extends keyof O
   ? "wsmtxca" extends O["service"]
@@ -42,6 +39,10 @@ export type ExactIssueInput<S extends IssuanceService = "wsfe"> =
   S extends "wsmtxca"
     ? import("./issuance-wsmtxca").WsmtxcaIssueRequest
     : WsfeVoucherInput;
+/**
+ * What issue() would send, derived with zero I/O. The voucher number is absent
+ * because it is only known when the number is reserved at issuance.
+ */
 export type IssuePreview<S extends IssuanceService = "wsfe"> = {
   voucherClass: VoucherClass;
   voucherType: number;

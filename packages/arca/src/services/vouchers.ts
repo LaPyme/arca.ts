@@ -76,25 +76,39 @@ export type VouchersService = {
     idempotencyKey: string,
     options?: O
   ): Promise<IssueOutcome<O & { service?: IssuanceService }>>;
+  /**
+   * Issues a debit note against the same originals `issueCreditNote()` accepts,
+   * or against a period with `associatedPeriod`. It has no `all: true` mode:
+   * a debit note adds to the account, so its lines are always explicit.
+   */
   issueDebitNote<O extends IssueOptions = { include?: never }>(
     input: DebitNoteInput,
     options?: O
   ): Promise<IssueOutcome<O>>;
+  /**
+   * Derives what issueCreditNote() would send. Unlike the zero-I/O preview(),
+   * it consults the original once: one read, no write and no number reserved.
+   * A period note carries its own business input and needs no lookup.
+   */
   previewCreditNote<O extends PreviewOptions = { service?: never }>(
     input: CreditNoteInput | PeriodNoteInput,
     options?: O
   ): Promise<IssuePreview<ServiceFor<O>>>;
+  /** Same contract as previewCreditNote(), for issueDebitNote() input. */
   previewDebitNote<O extends PreviewOptions = { service?: never }>(
     input: DebitNoteInput,
     options?: O
   ): Promise<IssuePreview<ServiceFor<O>>>;
   /**
-   * Issues a credit note against an authorized A, B or C invoice. The note
-   * credits the chosen `items`, or the whole original with `all: true`.
+   * Issues a credit note against an authorized invoice or debit note of the
+   * ordinary, retention-legend or FCE families, or against a period with
+   * `associatedPeriod`. The note credits the chosen `items` or reviewed
+   * `amounts`, or the whole original with `all: true`.
    *
-   * Everything except the credited lines, the note's sales point and its date
-   * comes from the original: class, receiver, currency, concept and service
-   * dates. ARCA has no cancellation; both modes write a real fiscal document.
+   * For a linked note everything except the credited lines, the note's sales
+   * point and its date comes from the original: class, receiver, currency,
+   * concept and service dates. ARCA has no cancellation; every mode writes a
+   * real fiscal document.
    */
   issueCreditNote<O extends IssueOptions = { include?: never }>(
     input: CreditNoteInput | PeriodNoteInput,
@@ -352,10 +366,15 @@ async function runOperation(
   }
   const prepared = await prepare();
   const number = await nextNumber(wsfe, prepared.data, options);
+  // A WSMTXCA or detailed reservation is a v2 record: 0.10 accepts any v1 record
+  // and would replay it through WSFE, so it must not be able to read this one.
+  const service = options.service ?? "wsfe";
+  const versioned =
+    service === "wsmtxca" || prepared.data.details !== undefined;
   const record: ArcaAttemptRecord = {
-    v: 1,
+    v: versioned ? 2 : 1,
     operation,
-    ...(options.service === "wsmtxca" ? { service: "wsmtxca" as const } : {}),
+    ...(versioned ? { service } : {}),
     representedTaxId,
     inputHash,
     number,
@@ -430,7 +449,8 @@ function readRecord(json: string): ArcaAttemptRecord {
     const record = JSON.parse(json) as ArcaAttemptRecord;
     if (
       !record ||
-      record.v !== 1 ||
+      (record.v !== 1 && record.v !== 2) ||
+      (record.v === 2 && record.service === undefined) ||
       !["issue", "creditNote", "debitNote"].includes(record.operation) ||
       typeof record.inputHash !== "string" ||
       !record.sent ||

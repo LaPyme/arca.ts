@@ -507,12 +507,13 @@ function transportFixture() {
       expiresAt: "2099-01-01T00:00:00Z",
     }),
   };
+  const store = createMemoryStore();
   const client = createVouchersService(
     fixture().wsfe,
-    { store: createMemoryStore(), environment: "test", taxId: config.taxId },
+    { store, environment: "test", taxId: config.taxId },
     createWsmtxcaService({ config, auth, soap })
   );
-  return { client, soap, calls, vouchers, config, auth };
+  return { client, soap, calls, vouchers, config, auth, store };
 }
 const detailed: IssueInput = {
   ...invoice,
@@ -747,6 +748,30 @@ describe("WSMTXCA high-level API through the real transport adapter", () => {
       )
     ).rejects.toMatchObject({ name: "ArcaInputError" });
     expect(calls).toEqual([]);
+  });
+  it("writes v2 records for WSMTXCA and refuses an unknown version", async () => {
+    const { client, store } = transportFixture();
+    const read = async (key: string) =>
+      JSON.parse(
+        (await store.get(attemptKey("test", "20123456789", key))) ?? "{}"
+      ) as { v: number; service?: string };
+    await client.issue(detailed, {
+      service: "wsmtxca",
+      idempotencyKey: "detailed",
+    });
+    await client.issue(invoice, { idempotencyKey: "plain" });
+    expect(await read("detailed")).toMatchObject({ v: 2, service: "wsmtxca" });
+    // A plain WSFE reservation stays v1 so a rollback to 0.10 keeps replaying it.
+    const plain = await read("plain");
+    expect(plain.v).toBe(1);
+    expect(plain.service).toBeUndefined();
+    await store.set(
+      attemptKey("test", "20123456789", "plain"),
+      JSON.stringify({ ...plain, v: 3 })
+    );
+    await expect(
+      client.issue(invoice, { idempotencyKey: "plain" })
+    ).rejects.toMatchObject({ name: "ArcaConfigurationError" });
   });
   it("decodes WSFE extension identity from SOAP consultation", async () => {
     const { config, auth } = transportFixture();

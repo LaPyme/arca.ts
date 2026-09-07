@@ -32,11 +32,15 @@ export type ArcaClient = {
   issue: VouchersService["issue"];
   /** Derives what issue() would send for the same input, with no I/O. */
   preview: VouchersService["preview"];
-  /** Issues a credit note against an authorized invoice, partial or full. */
+  /** Issues a credit note against an authorized original or a period. */
   issueCreditNote: VouchersService["issueCreditNote"];
+  /** Consults a durable reservation. Never allocates or authorizes a voucher. */
   recover: VouchersService["recover"];
+  /** Issues a debit note against an authorized original or a period. */
   issueDebitNote: VouchersService["issueDebitNote"];
+  /** Derives a credit note; reads the original but reserves no number. */
   previewCreditNote: VouchersService["previewCreditNote"];
+  /** Derives a debit note; reads the original but reserves no number. */
   previewDebitNote: VouchersService["previewDebitNote"];
   wsfe: WsfeService;
   wsmtxca: WsmtxcaService;
@@ -46,7 +50,9 @@ export type ArcaClient = {
 /**
  * Creates an ARCA client from the given configuration.
  * Validates the config, wires WSAA authentication and SOAP transport,
- * and returns an object with `issue()`, `preview()`, `issueCreditNote()` and the `.wsfe`, `.wsmtxca`, and `.padron` service modules.
+ * and returns an object with `issue()`, `preview()`, `issueCreditNote()`,
+ * `issueDebitNote()`, `previewCreditNote()`, `previewDebitNote()`, `recover()`
+ * and the `.wsfe`, `.wsmtxca`, and `.padron` service modules.
  *
  * @throws {ArcaConfigurationError} When the config is missing or invalid.
  */

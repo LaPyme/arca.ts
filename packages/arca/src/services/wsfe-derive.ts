@@ -21,6 +21,10 @@ import {
   type IssuanceFields,
   invoiceType,
   minor,
+  reviewedHeaderAmounts,
+  type Tribute,
+  tributeTotal,
+  type VoucherAmounts,
   validateFiscalHeader,
   validateIssuanceFields,
 } from "./issuance-fields";
@@ -126,19 +130,16 @@ export function deriveWsfeInvoice(
   assertSalesPoint(input.salesPoint);
   const receiver = deriveReceiver(input.to);
   const voucherClass = resolveInvoiceClass(input.issuer, input.to.condition);
-  const { data: amountsData, amounts } = calculateWsfeAmounts({
-    voucherClass,
-    items: input.amounts
-      ? voucherClass === "C"
-        ? [{ amount: 0 }]
-        : [{ net: 0, vat: 21 }]
-      : input.items,
-    total:
-      input.amounts || input.total === undefined
-        ? undefined
-        : input.total -
-          (input.taxes ?? []).reduce((sum, tax) => sum + tax.amount, 0),
-  });
+  const { data: amountsData, amounts } = input.amounts
+    ? reviewedInvoiceAmounts(input.amounts, input.taxes)
+    : calculateWsfeAmounts({
+        voucherClass,
+        items: input.items,
+        total:
+          input.total === undefined
+            ? undefined
+            : input.total - tributeTotal(input.taxes ?? []),
+      });
   const currency = deriveCurrency(input);
   const voucherDate = normalizeWsfeDateInput(
     input.date === undefined ? buenosAiresDate(now) : input.date,
@@ -157,7 +158,9 @@ export function deriveWsfeInvoice(
     ...deriveService(input.service, voucherDate),
   };
   applyIssuanceFields(data, input);
-  const extensionTotal = Number(
+  // Tributes reach the header after the item arithmetic, so the sent total is
+  // reconciled from the header itself.
+  const headerTotal = Number(
     normalizeArcaAmountToMinorUnits(data.netAmount, "net") +
       normalizeArcaAmountToMinorUnits(data.vatAmount, "vat") +
       normalizeArcaAmountToMinorUnits(data.exemptAmount, "exempt") +
@@ -167,11 +170,10 @@ export function deriveWsfeInvoice(
   const reviewedTotal = input.amounts ? input.total : undefined;
   data.totalAmount =
     reviewedTotal === undefined
-      ? extensionTotal / 100
+      ? headerTotal / 100
       : minor(reviewedTotal, "total");
-  const extra = extensionTotal - amounts.sentTotal;
-  amounts.computedTotal += extra;
-  amounts.sentTotal = reviewedTotal ?? extensionTotal;
+  amounts.computedTotal += headerTotal - amounts.sentTotal;
+  amounts.sentTotal = reviewedTotal ?? headerTotal;
   if (
     receiver.receiverVatConditionId === 5 &&
     receiver.documentType === ARCA_DOCUMENT_TYPES.CONSUMIDOR_FINAL
@@ -208,6 +210,42 @@ export function deriveWsfeInvoice(
     );
   }
   return { data, voucherClass, amounts };
+}
+
+type HeaderAmounts = Pick<
+  WsfeVoucherInput,
+  | "totalAmount"
+  | "netAmount"
+  | "vatAmount"
+  | "nonTaxableAmount"
+  | "exemptAmount"
+  | "taxAmount"
+  | "vatRates"
+>;
+/**
+ * Reviewed mode: the caller's breakdown and tributes are the header as given.
+ * Nothing is recomputed, so there is never a VAT adjustment; an explicit
+ * `total` is applied by the caller of this function and is not rewritten here.
+ */
+function reviewedInvoiceAmounts(
+  amounts: VoucherAmounts,
+  taxes: readonly Tribute[] | undefined
+): { data: HeaderAmounts; amounts: IssueAmounts } {
+  const taxTotal = taxes === undefined ? 0 : tributeTotal(taxes);
+  const total =
+    amounts.net +
+    amounts.vat +
+    (amounts.exempt ?? 0) +
+    (amounts.untaxed ?? 0) +
+    taxTotal;
+  return {
+    data: {
+      totalAmount: minor(total, "total"),
+      taxAmount: minor(taxTotal, "taxes.total"),
+      ...reviewedHeaderAmounts(amounts),
+    },
+    amounts: { computedTotal: total, sentTotal: total, vatAdjustment: 0 },
+  };
 }
 
 function assertIssuerCondition(issuer: IssueInput["issuer"]) {

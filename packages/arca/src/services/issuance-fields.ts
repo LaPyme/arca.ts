@@ -99,22 +99,10 @@ export function applyIssuanceFields(
       rate: tax.rate,
       amount: minor(tax.amount, "taxes.amount"),
     }));
-    data.taxAmount = minor(
-      fields.taxes.reduce((sum, tax) => sum + tax.amount, 0),
-      "taxes.total"
-    );
+    data.taxAmount = minor(tributeTotal(fields.taxes), "taxes.total");
   }
   if (fields.amounts) {
-    const a = fields.amounts;
-    data.netAmount = minor(a.net, "amounts.net");
-    data.vatAmount = minor(a.vat, "amounts.vat");
-    data.exemptAmount = minor(a.exempt ?? 0, "amounts.exempt");
-    data.nonTaxableAmount = minor(a.untaxed ?? 0, "amounts.untaxed");
-    data.vatRates = a.vatRates?.map((r) => ({
-      id: r.id,
-      baseAmount: minor(r.base, "amounts.vatRates.base"),
-      amount: minor(r.amount, "amounts.vatRates.amount"),
-    }));
+    Object.assign(data, reviewedHeaderAmounts(fields.amounts));
   }
   if (fields.concept) {
     data.concept = { products: 1, services: 2, products_and_services: 3 }[
@@ -140,6 +128,29 @@ export function applyIssuanceFields(
     }
   }
   applyFceFields(data, fields.fce);
+}
+/** Tributes are outside the item arithmetic; they add to the total in cents. */
+export function tributeTotal(taxes: readonly Tribute[]): number {
+  return taxes.reduce((sum, tax) => sum + tax.amount, 0);
+}
+/** A reviewed breakdown becomes the header verbatim: no VAT is recomputed. */
+export function reviewedHeaderAmounts(
+  amounts: VoucherAmounts
+): Pick<
+  WsfeVoucherInput,
+  "netAmount" | "vatAmount" | "exemptAmount" | "nonTaxableAmount" | "vatRates"
+> {
+  return {
+    netAmount: minor(amounts.net, "amounts.net"),
+    vatAmount: minor(amounts.vat, "amounts.vat"),
+    exemptAmount: minor(amounts.exempt ?? 0, "amounts.exempt"),
+    nonTaxableAmount: minor(amounts.untaxed ?? 0, "amounts.untaxed"),
+    vatRates: amounts.vatRates?.map((rate) => ({
+      id: rate.id,
+      baseAmount: minor(rate.base, "amounts.vatRates.base"),
+      amount: minor(rate.amount, "amounts.vatRates.amount"),
+    })),
+  };
 }
 export const ISSUANCE_KEYS = [
   "fce",

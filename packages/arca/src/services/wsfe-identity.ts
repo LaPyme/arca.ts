@@ -44,9 +44,11 @@ export type WsfeIdentityMatch =
   | { matches: false; evidence: "conflict" | "incomplete"; reason: string };
 
 /**
- * Compares the invoice subset supported by issue(). This proves
- * consistency, not authorship. Configure a store and pass idempotencyKey for retries.
- * Unsupported exact-API extensions are incomplete.
+ * Compares the invoice subset supported by issue(): header identity, amounts,
+ * VAT, tributes, associations, optional fields, buyers, activities and the
+ * foreign-currency payment flag. This proves consistency, not authorship.
+ * Configure a store and pass idempotencyKey for retries. Exact-API extensions
+ * outside that subset stay incomplete; a missing field is never proof.
  */
 export function matchWsfeVoucherIdentity(
   sent: WsfeVoucherInput,

@@ -33,8 +33,10 @@ import type { VoucherCoordinates } from "./wsfe-identity";
  * The credited lines and, at most, the note's own sales point and date.
  * Class, receiver, currency, concept and service dates come from the original.
  *
- * The mode is explicit: `items` credits the chosen lines, `all: true` credits
- * the whole original. A forgotten field never credits the whole invoice.
+ * The mode is explicit: `items` or a reviewed `amounts` breakdown credits the
+ * chosen lines, `all: true` credits the whole original. A forgotten field never
+ * credits the whole invoice. A full note mirrors the original's tributes; a
+ * partial note carries the `taxes` the caller chose, never a prorated share.
  */
 export type CreditNoteInput = Pick<
   IssuanceFields,
