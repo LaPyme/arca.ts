@@ -1,6 +1,18 @@
 import type { VoucherClass } from "../constants";
 import { ArcaInputError } from "../errors";
-import { normalizeArcaAmountToMinorUnits } from "../internal/decimal";
+import {
+  assertArcaMinorUnits,
+  normalizeArcaAmountToMinorUnits,
+} from "../internal/decimal";
+import {
+  applyFceFields,
+  applyIssuanceFields,
+  type IssuanceFields,
+  minor,
+  tributeTotal,
+  validateIssuanceFields,
+  voucherFamily,
+} from "./issuance-fields";
 import {
   normalizeWsfeDateInput,
   normalizeWsfeVoucherInput,
@@ -18,6 +30,7 @@ import {
   assertIssueObject,
   buenosAiresDate,
   type IssueInput,
+  reviewedInvoiceAmounts,
 } from "./wsfe-derive";
 import type { VoucherCoordinates } from "./wsfe-identity";
 
@@ -25,26 +38,37 @@ import type { VoucherCoordinates } from "./wsfe-identity";
  * The credited lines and, at most, the note's own sales point and date.
  * Class, receiver, currency, concept and service dates come from the original.
  *
- * The mode is explicit: `items` credits the chosen lines, `all: true` credits
- * the whole original. A forgotten field never credits the whole invoice.
+ * The mode is explicit: `items` or a reviewed `amounts` breakdown credits the
+ * chosen lines, `all: true` credits the whole original. A forgotten field never
+ * credits the whole invoice. A full note mirrors the original's tributes; a
+ * partial note carries the `taxes` the caller chose, never a prorated share.
  */
-export type CreditNoteInput = {
-  /** The authorized invoice the note corrects. */
+export type CreditNoteInput = Pick<
+  IssuanceFields,
+  "taxes" | "optionalFields" | "fce"
+> & {
+  details?: readonly import("./issuance-wsmtxca").VoucherItemDetail[];
+  /** The authorized invoice or debit note the note corrects. */
   for: VoucherCoordinates;
   salesPoint?: number;
   date?: WsfeDateInput;
 } & (
-  | { items: IssueInput["items"]; total?: number; all?: never }
-  | { all: true; items?: never; total?: never }
-);
+    | {
+        items: NonNullable<IssueInput["items"]>;
+        total?: number;
+        all?: never;
+        amounts?: never;
+      }
+    | {
+        amounts: import("./issuance-fields").VoucherAmounts;
+        items?: never;
+        total?: number;
+        all?: never;
+      }
+    | { all: true; items?: never; total?: never; amounts?: never }
+  );
 
 type CreditNote = { voucherType: number; voucherClass: VoucherClass };
-/** 10040: notes 3, 8 and 13 associate invoices 1, 6 and 11 respectively. */
-const NOTES: Record<number, CreditNote> = {
-  1: { voucherType: 3, voucherClass: "A" },
-  6: { voucherType: 8, voucherClass: "B" },
-  11: { voucherType: 13, voucherClass: "C" },
-};
 type CreditNoteHeader = Omit<
   WsfeVoucherInput,
   | "totalAmount"
@@ -63,7 +87,7 @@ type DerivedCreditNote = {
 
 function invalid(reason: string): never {
   throw new ArcaInputError(
-    `issueCreditNote cannot proceed: ${reason}. Use wsfe.issue() for exact control.`,
+    `issueCreditNote cannot proceed: ${reason}. Use the exact service API for manual control.`,
     { code: "ARCA_INPUT_INVALID_VALUE" }
   );
 }
@@ -78,11 +102,13 @@ function required<T>(value: T | undefined, field: string): T {
 export function deriveWsfeFullCreditNote(
   original: WsfeVoucherInfo,
   input: CreditNoteInput,
-  now = new Date()
+  now = new Date(),
+  kind: "creditNote" | "debitNote" = "creditNote"
 ): DerivedCreditNote {
-  const { note, header } = prepareCreditNote(original, input, now);
+  const { note, header } = prepareCreditNote(original, input, now, kind);
   const data: WsfeVoucherInput = {
     ...header,
+    ...(original.taxes ? { taxes: structuredClone(original.taxes) } : {}),
     totalAmount: required(original.totalAmount, "totalAmount"),
     netAmount: required(original.netAmount, "netAmount"),
     vatAmount: required(original.vatAmount, "vatAmount"),
@@ -108,28 +134,71 @@ export function deriveWsfeFullCreditNote(
 export function deriveWsfePartialCreditNote(
   original: WsfeVoucherInfo,
   input: CreditNoteInput,
-  now = new Date()
+  now = new Date(),
+  kind: "creditNote" | "debitNote" = "creditNote"
 ): DerivedCreditNote {
-  if (input.items === undefined) {
+  if (input.items === undefined && input.amounts === undefined) {
     invalid("items is required to credit chosen lines");
   }
-  const { note, header } = prepareCreditNote(original, input, now);
+  // A requested total is minor units like every other amount. It is checked
+  // here, before the original is read, so a non-integer never reaches BigInt().
+  const requestedTotal =
+    input.total === undefined
+      ? undefined
+      : assertArcaMinorUnits(input.total, "total");
+  const { note, header } = prepareCreditNote(original, input, now, kind);
   // The class comes from the original, so the item shape must match it.
-  const { data: amountsData, amounts } = calculateWsfeAmounts({
-    voucherClass: note.voucherClass,
-    items: input.items,
-    total: input.total,
-  });
+  // A reviewed breakdown takes the same path invoices take.
+  const { data: amountsData, amounts } = input.amounts
+    ? reviewedInvoiceAmounts(input.amounts, input.taxes)
+    : calculateWsfeAmounts({
+        voucherClass: note.voucherClass,
+        items: input.items as NonNullable<IssueInput["items"]>,
+        total:
+          input.total === undefined
+            ? undefined
+            : input.total - tributeTotal(input.taxes ?? []),
+      });
   const originalTotal = normalizeArcaAmountToMinorUnits(
     required(original.totalAmount, "totalAmount"),
     "totalAmount"
   );
-  if (BigInt(amounts.sentTotal) > originalTotal) {
+  if (
+    kind === "creditNote" &&
+    (requestedTotal ?? BigInt(amounts.sentTotal)) > originalTotal
+  ) {
     invalid(
       "the note total is greater than the original; the SDK does not track earlier notes against an original"
     );
   }
   const data: WsfeVoucherInput = { ...header, ...amountsData };
+  applyIssuanceFields(data, {
+    ...input,
+    fce: undefined,
+    optionalFields: undefined,
+  });
+  const total = Number(
+    [
+      data.netAmount,
+      data.vatAmount,
+      data.exemptAmount,
+      data.nonTaxableAmount,
+      data.taxAmount,
+    ].reduce(
+      (sum, amount) => sum + normalizeArcaAmountToMinorUnits(amount, "amount"),
+      0n
+    )
+  );
+  const sentTotal =
+    input.amounts && requestedTotal !== undefined
+      ? Number(requestedTotal)
+      : total;
+  if (kind === "creditNote" && BigInt(sentTotal) > originalTotal) {
+    invalid("the note total is greater than the original");
+  }
+  data.totalAmount = minor(sentTotal, "total");
+  amounts.computedTotal += total - amounts.sentTotal;
+  amounts.sentTotal = sentTotal;
   normalizeWsfeVoucherInput(data);
   return { data, voucherClass: note.voucherClass, amounts };
 }
@@ -138,12 +207,18 @@ export function deriveWsfePartialCreditNote(
 function prepareCreditNote(
   original: WsfeVoucherInfo,
   input: CreditNoteInput,
-  now: Date
+  now: Date,
+  kind: "creditNote" | "debitNote"
 ): { note: CreditNote; header: CreditNoteHeader } {
-  const note = NOTES[original.voucherType ?? 0];
-  if (!note) {
-    invalid("original must be an invoice of type 1, 6 or 11");
+  assertOriginalExtensions(original);
+  const family = voucherFamily(original.voucherType ?? 0);
+  if (family.types[2] === original.voucherType) {
+    invalid("original must be an invoice or debit note");
   }
+  const note = {
+    voucherClass: family.voucherClass,
+    voucherType: family.types[kind === "creditNote" ? 2 : 1] as number,
+  };
   if (
     !(
       ["A", "O"].includes(original.result ?? "") &&
@@ -153,10 +228,7 @@ function prepareCreditNote(
   ) {
     invalid("original is not authorized");
   }
-  rejectExtensions(original);
-  if (original.currencyId !== "PES" && original.currencyId !== "DOL") {
-    invalid("unsupported currency; only ARS and USD are supported");
-  }
+
   const voucherDate = normalizeWsfeDateInput(
     input.date ?? buenosAiresDate(now),
     "date"
@@ -183,7 +255,20 @@ function prepareCreditNote(
       original.receiverVatConditionId,
       "receiverVatConditionId"
     ),
-    currencyId: original.currencyId,
+    currencyId: required(original.currencyId, "currencyId"),
+    ...(original.sameCurrencyForeignCancellation === undefined
+      ? {}
+      : {
+          sameCurrencyForeignCancellation:
+            original.sameCurrencyForeignCancellation,
+        }),
+    ...(original.buyers ? { buyers: structuredClone(original.buyers) } : {}),
+    ...(original.activities
+      ? { activities: structuredClone(original.activities) }
+      : {}),
+    ...(input.optionalFields
+      ? { optionalFields: structuredClone(input.optionalFields) }
+      : {}),
     exchangeRate: required(original.exchangeRate, "exchangeRate"),
     voucherDate,
     associatedVouchers: [
@@ -195,36 +280,11 @@ function prepareCreditNote(
       },
     ],
   };
+  applyFceFields(header, input.fce);
   copyServiceDates(original, header);
   return { note, header };
 }
 
-function rejectExtensions(original: WsfeVoucherInfo) {
-  for (const [field, rawField] of [
-    ["taxes", "Tributos"],
-    ["optionalFields", "Opcionales"],
-    ["buyers", "Compradores"],
-    ["activities", "Actividades"],
-    ["associatedPeriod", "PeriodoAsoc"],
-  ]) {
-    const value = (original as unknown as Record<string, unknown>)[field];
-    const raw = original.raw[rawField];
-    if (present(value) || present(raw)) {
-      invalid(`unsupported original ${field}`);
-    }
-  }
-  if ((original.taxAmount ?? 0) !== 0) {
-    invalid("unsupported original taxes");
-  }
-}
-function present(value: unknown): boolean {
-  return (
-    value !== undefined &&
-    value !== null &&
-    value !== "" &&
-    (!Array.isArray(value) || value.length > 0)
-  );
-}
 function copyServiceDates(original: WsfeVoucherInfo, header: CreditNoteHeader) {
   if (header.concept !== 2 && header.concept !== 3) {
     return;
@@ -244,7 +304,19 @@ function copyServiceDates(original: WsfeVoucherInfo, header: CreditNoteHeader) {
   header.paymentDueDate = due < header.voucherDate ? header.voucherDate : due;
 }
 
-const CREDIT_NOTE_KEYS = ["for", "salesPoint", "date", "items", "total", "all"];
+const CREDIT_NOTE_KEYS = [
+  "for",
+  "salesPoint",
+  "date",
+  "items",
+  "total",
+  "all",
+  "taxes",
+  "amounts",
+  "optionalFields",
+  "details",
+  "fce",
+];
 const TARGET_BOUNDS = [
   ["salesPoint", 99_999],
   ["voucherType", 999],
@@ -254,9 +326,10 @@ const TARGET_BOUNDS = [
 /** Zero I/O: rejects an ambiguous mode and copies the lines the caller owns. */
 export function assertCreditNoteInput(input: CreditNoteInput): CreditNoteInput {
   assertIssueObject(input, "input");
+  validateIssuanceFields(input);
   if ("associatedPeriod" in input) {
     throw new ArcaInputError(
-      "issueCreditNote does not support associatedPeriod; a note against a period is exact-layer work. Use wsfe.issue() for exact control.",
+      "issueCreditNote does not support associatedPeriod; a note against a period is exact-layer work. Use the exact service API for manual control.",
       {
         code: "ARCA_INPUT_RESERVED_FIELD",
         field: "associatedPeriod",
@@ -274,46 +347,51 @@ export function assertCreditNoteInput(input: CreditNoteInput): CreditNoteInput {
       ? undefined
       : (normalizeWsfeDateInput(input.date, "date") as WsfeDateInput);
   const common = {
+    ...(input.fce === undefined ? {} : { fce: structuredClone(input.fce) }),
+    ...(input.taxes === undefined
+      ? {}
+      : { taxes: structuredClone(input.taxes) }),
+    ...(input.details === undefined
+      ? {}
+      : { details: structuredClone(input.details) }),
+    ...(input.optionalFields === undefined
+      ? {}
+      : { optionalFields: structuredClone(input.optionalFields) }),
     for: target,
     ...(input.salesPoint === undefined ? {} : { salesPoint: input.salesPoint }),
     ...(date === undefined ? {} : { date }),
   };
-  if ((input.items === undefined) === (input.all === undefined)) {
+  if (input.items !== undefined && input.amounts !== undefined) {
+    invalid("use items or amounts, never both");
+  }
+  if (
+    (input.items === undefined && input.amounts === undefined) ===
+    (input.all === undefined)
+  ) {
     throw new ArcaInputError(
-      "issueCreditNote needs exactly one mode: items for the credited lines, or all: true for the whole original.",
+      "issueCreditNote needs exactly one mode: items or amounts for a partial note, or all: true for the whole original.",
       {
         code: "ARCA_INPUT_INVALID_VALUE",
         field: input.items === undefined ? "input.items" : "input.all",
-        expected: "either items or all: true, never both and never neither",
+        expected: "exactly one of items, amounts or all: true",
       }
     );
   }
   if (input.all !== undefined) {
-    if (input.all !== true) {
-      throw new ArcaInputError(
-        "issueCreditNote accepts only all: true; pass items to credit chosen lines.",
-        {
-          code: "ARCA_INPUT_INVALID_VALUE",
-          field: "input.all",
-          expected: "the literal true",
-        }
-      );
-    }
-    if (input.total !== undefined) {
-      throw new ArcaInputError(
-        "issueCreditNote takes total only with items; all: true credits the original's own total.",
-        {
-          code: "ARCA_INPUT_INVALID_VALUE",
-          field: "input.total",
-          expected: "no total when all is true",
-        }
-      );
-    }
+    assertFullMode(input);
     return { ...common, all: true };
+  }
+  if (input.amounts !== undefined) {
+    return {
+      ...common,
+      amounts: structuredClone(input.amounts),
+      ...(input.total === undefined ? {} : { total: input.total }),
+    };
   }
   return {
     ...common,
-    items: copyCreditNoteItems(input.items),
+    amounts: undefined,
+    items: copyCreditNoteItems(input.items as NonNullable<IssueInput["items"]>),
     ...(input.total === undefined ? {} : { total: input.total }),
   };
 }
@@ -338,9 +416,13 @@ function assertCreditNoteTarget(value: CreditNoteInput["for"]) {
   for (const [field, max] of TARGET_BOUNDS) {
     assertCreditNoteBound(value[field], max, `for.${field}`);
   }
-  if (![1, 6, 11].includes(value.voucherType)) {
+  if (
+    ![1, 2, 6, 7, 11, 12, 51, 52, 201, 202, 206, 207, 211, 212].includes(
+      value.voucherType
+    )
+  ) {
     throw new ArcaInputError(
-      "issueCreditNote requires an authorized invoice of type 1, 6 or 11 in for.voucherType. Use wsfe.issue() for exact control.",
+      "issueCreditNote requires an authorized invoice or debit note in a supported family in for.voucherType. Use the exact service API for manual control.",
       {
         code: "ARCA_INPUT_INVALID_VALUE",
         field: "input.for.voucherType",
@@ -381,4 +463,75 @@ function copyCreditNoteItems<T extends readonly VatItem[] | readonly object[]>(
   return items.map((item) =>
     item === null || typeof item !== "object" ? item : { ...item }
   ) as unknown as T;
+}
+
+function assertOriginalExtensions(original: WsfeVoucherInfo) {
+  for (const [field, rawField] of [
+    ["taxes", "Tributos"],
+    ["optionalFields", "Opcionales"],
+    ["buyers", "Compradores"],
+    ["activities", "Actividades"],
+    ["associatedPeriod", "PeriodoAsoc"],
+  ] as const) {
+    if (original.raw[rawField] && original[field] === undefined) {
+      invalid(`original ${field} could not be decoded`);
+    }
+  }
+  try {
+    validateIssuanceFields({
+      taxes: original.taxes?.map((t) => ({
+        id: t.id,
+        description: t.description,
+        base: Number(
+          normalizeArcaAmountToMinorUnits(t.baseAmount, "taxes.base")
+        ),
+        rate: t.rate,
+        amount: Number(
+          normalizeArcaAmountToMinorUnits(t.amount, "taxes.amount")
+        ),
+      })),
+      optionalFields: original.optionalFields,
+      buyers: original.buyers,
+      activities: original.activities,
+    });
+    if (original.associatedPeriod) {
+      normalizeWsfeDateInput(
+        original.associatedPeriod.startDate,
+        "associatedPeriod.startDate"
+      );
+      normalizeWsfeDateInput(
+        original.associatedPeriod.endDate,
+        "associatedPeriod.endDate"
+      );
+    }
+  } catch {
+    invalid("original extension fields are incomplete or malformed");
+  }
+}
+
+function assertFullMode(input: CreditNoteInput): void {
+  if (input.all !== true) {
+    throw new ArcaInputError(
+      "issueCreditNote accepts only all: true; pass items to credit chosen lines.",
+      {
+        code: "ARCA_INPUT_INVALID_VALUE",
+        field: "input.all",
+        expected: "the literal true",
+      }
+    );
+  }
+  if (
+    input.total !== undefined ||
+    input.taxes !== undefined ||
+    input.amounts !== undefined
+  ) {
+    throw new ArcaInputError(
+      "issueCreditNote takes total only with items; all: true credits the original's own total.",
+      {
+        code: "ARCA_INPUT_INVALID_VALUE",
+        field: "input.total",
+        expected: "no total when all is true",
+      }
+    );
+  }
 }

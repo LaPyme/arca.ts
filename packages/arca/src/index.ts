@@ -50,14 +50,33 @@ export type {
   ArcaVoucherLookupResult,
 } from "./services/fiscal-evidence";
 export type {
+  FceOptions,
+  InvoiceFamily,
+  IssuanceFields,
+  Tribute,
+  VoucherAmounts,
+} from "./services/issuance-fields";
+export type {
+  VoucherItemDetail,
+  WsmtxcaIssueRequest,
+} from "./services/issuance-wsmtxca";
+export type {
   CreatePadronServiceOptions,
   PadronService,
   PadronTaxIdLookupResult,
   PadronTaxpayerResult,
 } from "./services/padron";
 export { createPadronService } from "./services/padron";
-export type { VouchersService } from "./services/vouchers";
 export type {
+  DebitNoteInput,
+  PeriodNoteInput,
+  PreviewOptions,
+  RecoveryOptions,
+  VouchersService,
+} from "./services/vouchers";
+export type {
+  ExactIssueInput,
+  IssuanceService,
   IssuedVoucher,
   IssueOptions,
   IssueOutcome,

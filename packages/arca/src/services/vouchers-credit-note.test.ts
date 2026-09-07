@@ -147,6 +147,31 @@ describe("credit note orchestration", () => {
     expect(wsfe.issue.mock.calls[0][0].data.totalAmount).toBe(0.4);
   });
   it.each([
+    ["a fractional", 100.5],
+    ["a non-finite", Number.NaN],
+  ] as const)("rejects %s reviewed total without authorizing", async (_case, total) => {
+    const reviewed = {
+      for: target,
+      date: "20260905",
+      amounts: { net: 40, vat: 0 },
+      total,
+    } as CreditNoteInput;
+    for (const preview of [true, false]) {
+      const { service, wsfe } = fake();
+      await expect(
+        preview
+          ? service.previewCreditNote(reviewed)
+          : service.issueCreditNote(reviewed)
+      ).rejects.toMatchObject({
+        name: "ArcaInputError",
+        code: "ARCA_INPUT_INVALID_AMOUNT",
+        field: "total",
+      });
+      expect(wsfe.getNextVoucherNumber).not.toHaveBeenCalled();
+      expect(wsfe.issue).not.toHaveBeenCalled();
+    }
+  });
+  it.each([
     ["all", note],
     ["items", partial],
   ] as const)("records operation creditNote for the %s mode", async (_mode, input) => {
@@ -213,14 +238,17 @@ describe("credit note orchestration", () => {
     ["both modes", { for: target, all: true, items: [{ amount: 40 }] }],
     ["all: false", { for: target, all: false }],
     ["all with a total", { for: target, all: true, total: 40 }],
-    ["a debit note target", { for: { ...target, voucherType: 12 }, all: true }],
     [
-      "an A debit note target",
-      { for: { ...target, voucherType: 2 }, all: true },
+      "a credit note target",
+      { for: { ...target, voucherType: 13 }, all: true },
     ],
     [
-      "a B debit note target",
-      { for: { ...target, voucherType: 7 }, all: true },
+      "an A credit note target",
+      { for: { ...target, voucherType: 3 }, all: true },
+    ],
+    [
+      "a B credit note target",
+      { for: { ...target, voucherType: 8 }, all: true },
     ],
     ["an associated period", { for: target, all: true, associatedPeriod: {} }],
     ["a receiver", { for: target, all: true, to: { condition: "exento" } }],

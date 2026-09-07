@@ -2,6 +2,7 @@ import {
   normalizeArcaAmountToMinorUnits,
   serializeArcaExchangeRate,
 } from "../internal/decimal";
+import { canonicalHash } from "../store/types";
 import type { WsfeVatRate, WsfeVoucherInfo, WsfeVoucherInput } from "./wsfe";
 import { normalizeWsfeDateInput } from "./wsfe";
 
@@ -43,9 +44,11 @@ export type WsfeIdentityMatch =
   | { matches: false; evidence: "conflict" | "incomplete"; reason: string };
 
 /**
- * Compares the invoice subset supported by issue(). This proves
- * consistency, not authorship. Configure a store and pass idempotencyKey for retries.
- * Unsupported exact-API extensions are incomplete.
+ * Compares the invoice subset supported by issue(): header identity, amounts,
+ * VAT, tributes, associations, optional fields, buyers, activities and the
+ * foreign-currency payment flag. This proves consistency, not authorship.
+ * Configure a store and pass idempotencyKey for retries. Exact-API extensions
+ * outside that subset stay incomplete; a missing field is never proof.
  */
 export function matchWsfeVoucherIdentity(
   sent: WsfeVoucherInput,
@@ -138,32 +141,26 @@ export function matchWsfeVoucherIdentity(
       ]);
     }
   }
+  if (sent.concept === 1 && sent.paymentDueDate) {
+    checks.push([
+      "paymentDueDate",
+      sent.paymentDueDate,
+      found.paymentDueDate,
+      (value) => normalizeWsfeDateInput(value, "paymentDueDate"),
+    ]);
+  }
   for (const check of checks) {
     const result = compare(...check);
     if (result) {
       return result;
     }
   }
-  const rates = compareVatRates(sent.vatRates ?? [], found.vatRates);
-  if (!rates.matches) {
-    if (rates.evidence === "conflict") {
-      return rates;
+  const detailMatch = compareDetails(sent, found);
+  if (!detailMatch.matches) {
+    if (detailMatch.evidence === "conflict") {
+      return detailMatch;
     }
-    missing ??= rates.reason;
-  }
-  if (sent.associatedVouchers?.length) {
-    if (!found.associatedVouchers) {
-      missing ??= "associatedVouchers";
-    } else if (
-      associationIdentity(sent.associatedVouchers) !==
-      associationIdentity(found.associatedVouchers)
-    ) {
-      return {
-        matches: false,
-        evidence: "conflict",
-        reason: "associatedVouchers differ from the sent input",
-      };
-    }
+    missing ??= detailMatch.reason;
   }
   missing ??= incompleteAuthorization(sent, found);
   return missing
@@ -180,22 +177,9 @@ function incompleteAuthorization(
   found: WsfeVoucherInfo
 ): string | undefined {
   let missing: string | undefined;
-  // These fields have no complete consultation identity contract in this facade.
+  // Authorization must be explicit even when all fiscal fields match.
   if (sent.concept !== 1 && sent.concept !== 2 && sent.concept !== 3) {
     missing ??= "unsupported concept";
-  }
-  for (const field of [
-    "taxes",
-    "associatedPeriod",
-    "optionalFields",
-    "buyers",
-    "activities",
-    "sameCurrencyForeignCancellation",
-  ] as const) {
-    const value = sent[field];
-    if (value !== undefined && (!Array.isArray(value) || value.length > 0)) {
-      missing ??= `unsupported exact field ${field}`;
-    }
   }
   if (!(found.result === "A" || found.result === "O")) {
     missing ??= "authorized result";
@@ -319,12 +303,183 @@ export function toVoucherSummary(found: WsfeVoucherInfo): VoucherSummary {
   return summary;
 }
 
-function associationIdentity(
-  vouchers: NonNullable<WsfeVoucherInput["associatedVouchers"]>
-): string {
-  return JSON.stringify(
-    vouchers
-      .map(({ type, salesPoint, number }) => `${type}:${salesPoint}:${number}`)
-      .sort()
-  );
+function compareAssociations(
+  sent: WsfeVoucherInput,
+  found: WsfeVoucherInfo
+): WsfeIdentityMatch {
+  const expected = sent.associatedVouchers ?? [];
+  const actual = found.associatedVouchers;
+  if (!actual) {
+    return expected.length
+      ? { matches: false, evidence: "incomplete", reason: "associatedVouchers" }
+      : { matches: true };
+  }
+  if (expected.length !== actual.length) {
+    return {
+      matches: false,
+      evidence: "conflict",
+      reason: "associatedVouchers count differs",
+    };
+  }
+  for (const association of expected) {
+    const match = actual.find(
+      (v) =>
+        v.type === association.type &&
+        v.salesPoint === association.salesPoint &&
+        v.number === association.number
+    );
+    if (!match) {
+      return {
+        matches: false,
+        evidence: "conflict",
+        reason: "associatedVouchers differ from the sent input",
+      };
+    }
+    const metadata = compareAssociationMetadata(association, match);
+    if (!metadata.matches) {
+      return metadata;
+    }
+  }
+  return { matches: true };
+}
+function compareDetails(
+  sent: WsfeVoucherInput,
+  found: WsfeVoucherInfo
+): WsfeIdentityMatch {
+  let incomplete: WsfeIdentityMatch | undefined;
+  for (const result of [
+    compareVatRates(sent.vatRates ?? [], found.vatRates),
+    compareAssociations(sent, found),
+    compareExtensions(sent, found),
+  ]) {
+    if (result.matches) {
+      continue;
+    }
+    if (result.evidence === "conflict") {
+      return result;
+    }
+    incomplete ??= result;
+  }
+  return incomplete ?? { matches: true };
+}
+
+function extensionIdentity(field: string, value: unknown): string {
+  if (Array.isArray(value)) {
+    return canonicalHash(
+      value
+        .map((item) => {
+          if (field === "taxes") {
+            const tax = item as NonNullable<WsfeVoucherInput["taxes"]>[number];
+            return {
+              id: tax.id,
+              base: String(
+                normalizeArcaAmountToMinorUnits(tax.baseAmount, "base")
+              ),
+              amount: String(
+                normalizeArcaAmountToMinorUnits(tax.amount, "amount")
+              ),
+              rate: Number(tax.rate),
+            };
+          }
+          return item;
+        })
+        .sort((a, b) => canonicalHash(a).localeCompare(canonicalHash(b)))
+    );
+  }
+  if (field === "associatedPeriod" && value) {
+    const period = value as NonNullable<WsfeVoucherInput["associatedPeriod"]>;
+    return canonicalHash({
+      start: normalizeWsfeDateInput(period.startDate, "start"),
+      end: normalizeWsfeDateInput(period.endDate, "end"),
+    });
+  }
+  return canonicalHash(value ?? null);
+}
+
+function compareExtensions(
+  sent: WsfeVoucherInput,
+  found: WsfeVoucherInfo
+): WsfeIdentityMatch {
+  let missing: string | undefined;
+  for (const field of [
+    "taxes",
+    "optionalFields",
+    "buyers",
+    "activities",
+    "associatedPeriod",
+    "sameCurrencyForeignCancellation",
+  ] as const) {
+    const expected = sent[field];
+    const actual = found[field];
+    const empty = (value: unknown) =>
+      value === undefined || (Array.isArray(value) && value.length === 0);
+    if (empty(expected) && empty(actual)) {
+      continue;
+    }
+    if (actual === undefined) {
+      missing ??= field;
+      continue;
+    }
+    try {
+      if (
+        extensionIdentity(field, expected) !== extensionIdentity(field, actual)
+      ) {
+        return {
+          matches: false,
+          evidence: "conflict",
+          reason: `${field} differs from the sent input`,
+        };
+      }
+    } catch {
+      missing ??= field;
+    }
+  }
+
+  return missing
+    ? { matches: false, evidence: "incomplete", reason: missing }
+    : { matches: true };
+}
+
+function compareAssociationMetadata(
+  association: NonNullable<WsfeVoucherInput["associatedVouchers"]>[number],
+  match: NonNullable<WsfeVoucherInput["associatedVouchers"]>[number]
+): WsfeIdentityMatch {
+  for (const field of ["taxId", "voucherDate"] as const) {
+    if (association[field] === undefined) {
+      continue;
+    }
+    if (match[field] === undefined) {
+      return {
+        matches: false,
+        evidence: "incomplete",
+        reason: `associatedVouchers.${field}`,
+      };
+    }
+    const normalize = (value: string) =>
+      field === "taxId"
+        ? String(BigInt(value))
+        : normalizeWsfeDateInput(
+            value as import("./wsfe").WsfeDateInput,
+            "association.date"
+          );
+    try {
+      if (
+        normalize(association[field] as string) !==
+        normalize(match[field] as string)
+      ) {
+        return {
+          matches: false,
+          evidence: "conflict",
+          reason: `associatedVouchers.${field} differs`,
+        };
+      }
+    } catch {
+      return {
+        matches: false,
+        evidence: "incomplete",
+        reason: `associatedVouchers.${field}`,
+      };
+    }
+  }
+  return { matches: true };
 }

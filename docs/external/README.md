@@ -52,7 +52,7 @@ and 10197 were re-read against the same pinned file on 2026-09-06.
 | Rule | Physical PDF pages | Contract |
 | --- | --- | --- |
 | 10197 | 67-68 | Notes require associated vouchers or an associated period. Re-checked 2026-09-06: the rule reads "Si el comprobante es Debito o Credito, se deberá informar de forma obligatoria los campos Fecha Comprobantes Asociados Desde/Hasta, o al menos un comprobante asociado", so a single associated invoice satisfies it and no manual rule ties the note's amount to the associated voucher. A partial-amount ordinary credit note with one associated invoice and no further field is allowed. |
-| 10040 | 46-47 | Credit notes 3, 8 and 13 may associate invoices 1, 6 and 11 respectively. Re-checked 2026-09-06: the full lists on page 47 are 1, 2, 3, 4, 5, 34, 39, 60, 63, 88 and 991 for 2 and 3; 6, 7, 8, 9, 10, 35, 40, 61, 64, 88 and 991 for 7 and 8; and 11, 12, 13 and 15 for 12 and 13. Debit notes 2, 7 and 12 are therefore allowed association targets for credit notes 3, 8 and 13; the facade still accepts only invoices 1, 6 and 11. |
+| 10040 | 46-47 | Credit notes 3, 8 and 13 may associate invoices 1, 6 and 11 respectively. Re-checked 2026-09-06: the full lists on page 47 are 1, 2, 3, 4, 5, 34, 39, 60, 63, 88 and 991 for 2 and 3; 6, 7, 8, 9, 10, 35, 40, 61, 64, 88 and 991 for 7 and 8; and 11, 12, 13 and 15 for 12 and 13. Debit notes 2, 7 and 12 are therefore allowed association targets for credit notes 3, 8 and 13; the high-level API now accepts invoice and debit-note targets in the supported ordinary, retention-legend and FCE families. |
 | 10237 | 75-76 | A credit note whose amount exceeds the associated voucher it adjusts is an observation, not a rejection. The CAEA list repeats it as observation 818 (page 159). |
 | CbtesAsoc structure | 31 | An associated voucher requires only Tipo, PtoVta and Nro; Cuit and CbteFch are optional. |
 | 10031-10033, 10035-10036 | 45-46 | Service dates and due date accompany each other; start cannot exceed end; due date cannot precede issuance. |
@@ -62,6 +62,20 @@ and 10197 were re-read against the same pinned file on 2026-09-06.
 | 10183 | 66 | Issuer and receiver matching is explicit for MiPyMEs notes. |
 | 10151 | 61 | An optional associated issuer CUIT must have eleven digits; MiPyMEs notes require it. |
 
+## 10061 and the FCE family (2026-09-07)
+
+Re-read against the same pinned v4.7 file. The rule text is: "La suma de los
+campos <BaseImp> en <AlicIva> debe ser igual al valor ingresado en ImpNeto.
+Esta validacion no debera ser tenida en cuenta, cuando el <CbteTipo> sea 02,
+03, 07, 08, para comprobantes tipo C (11, 12, 13, 15) y para Comprobantes tipo
+M (52, 53)". The enumeration predates the FCE (MiPyME) types and was never
+extended, so the SDK exempts 202, 203, 207 and 208 as the notes of the FCE
+family - the same document role as 02, 03, 07 and 08 - and 211, 212 and 213 as
+class C vouchers, which carry no VAT breakdown at all under 10047. The
+exemption is a local pre-flight allowance only: ARCA remains authoritative, and
+being permissive here never rejects a voucher ARCA would authorize. FCE
+invoices 201 and 206 still reconcile their bases.
+
 The extra association obligations at 10153-10160 (pages 61-63) - a mandatory
 associated voucher, a mandatory associated date, the issuer CUIT match and the
 single associated invoice - are written for MiPyMEs (FCE) notes only and do not
@@ -70,7 +84,7 @@ reach ordinary notes 3, 8 and 13. Together with the CbtesAsoc structure on page
 FECompConsultar on the original does not return.
 
 For ordinary full credit notes, preserving the original receiver document and
-VAT condition is the facade contract; the narrower matching validations above
+VAT condition is the high-level API contract; the narrower matching validations above
 must not be presented as a universal ordinary-note rule. The original is
 consulted under the issuing taxpayer's authenticated CUIT (FECompConsultar,
 pages 190-191). Service dates are preserved for concepts 2 and 3; the due date
@@ -80,3 +94,16 @@ FECompConsultar returns FECAEDetRequest fields (page 193). Its abbreviated
 XML example omits newer fields; the official homologation WSDL confirms
 FECompConsResponse inherits FECAEDetRequest/FEDetRequest, including receiver
 VAT condition, associations and extensions.
+
+## High-level API expansion (2026-09-06)
+
+Rechecked the official WSFE v4.7 and
+[WSMTXCA v0.25.8](https://www.arca.gob.ar/fe/ayuda/documentos/wsmtxca-RG-2904.pdf)
+manuals for this expansion. WSFE note associations include debit-note targets;
+receiver conditions follow its final matrix. WSFE FCE options 2101/2102 encode
+CBU/alias, while WSMTXCA combines them as additional-data type 21 (`c1`/`c2`).
+Both use 22 for explicit annulment and 27 for transfer. See WSFE rules
+10165-10173 and WSMTXCA rules 327-334. WSMTXCA's authorization and consultation
+schemas include associated periods, buyers, activities and foreign-currency
+payment (physical pages 22-25 and 257-260). Its detailed item consultation is
+used to check the reserved request, not just its header total.

@@ -223,7 +223,7 @@ describe("WSFE invoice derivation", () => {
       "service.dueDate",
     ],
     [{ ...base, kind: "credit_note" }, "kind"],
-    [{ ...base, taxes: [] }, "taxes"],
+    [{ ...base, taxes: {} }, "taxes"],
   ])("reports stable caller field paths for %j", (input, field) => {
     expect(() => derive(input)).toThrowError(
       expect.objectContaining({ field })

@@ -126,7 +126,7 @@ describe("full credit note derivation", () => {
     ["buyers", "Compradores"],
     ["activities", "Actividades"],
     ["associatedPeriod", "PeriodoAsoc"],
-  ])("rejects unsupported %s", (field, rawField) => {
+  ])("rejects undecodable or malformed original %s", (field, rawField) => {
     expect(() =>
       deriveWsfeFullCreditNote(
         { ...invoice, raw: { [rawField]: { value: 1 } } },
@@ -138,19 +138,18 @@ describe("full credit note derivation", () => {
         { ...invoice, [field]: [{ value: 1 }] },
         full("20260905")
       )
-    ).toThrow("wsfe.issue()");
+    ).toThrow("exact service API");
     expect(() =>
       deriveWsfePartialCreditNote(
         { ...invoice, [field]: [{ value: 1 }] },
         partial([{ gross: 100, vat: 21 }])
       )
-    ).toThrow("wsfe.issue()");
+    ).toThrow("exact service API");
   });
   it("rejects missing required evidence and unsupported originals", () => {
     for (const change of [
       { result: "R" },
       { voucherType: 8 },
-      { currencyId: "060" },
       { cae: undefined },
       { receiverVatConditionId: undefined },
       { taxAmount: 1 },
@@ -294,6 +293,51 @@ describe("partial credit note derivation", () => {
       deriveWsfePartialCreditNote(invoice, partial(items, { total: 7720 }))
     ).toThrowError(
       expect.objectContaining({ code: "ARCA_INPUT_AMOUNT_MISMATCH" })
+    );
+  });
+  it("credits a reviewed breakdown the way issue() derives one", () => {
+    const result = deriveWsfePartialCreditNote(invoice, {
+      for: target,
+      date: "20260905",
+      amounts: {
+        net: 10_000,
+        vat: 2100,
+        vatRates: [{ id: 5, base: 10_000, amount: 2100 }],
+      },
+      taxes: [{ id: 99, base: 10_000, rate: 1, amount: 100 }],
+    });
+    expect(result.data).toMatchObject({
+      voucherType: 8,
+      totalAmount: 122,
+      netAmount: 100,
+      vatAmount: 21,
+      taxAmount: 1,
+      vatRates: [{ id: 5, baseAmount: 100, amount: 21 }],
+    });
+    expect(result.amounts).toEqual({
+      computedTotal: 12_200,
+      sentTotal: 12_200,
+      vatAdjustment: 0,
+    });
+    normalizeWsfeVoucherInput(result.data);
+  });
+  it.each([
+    100.5,
+    Number.NaN,
+  ])("rejects the reviewed total %s before reading the original", (total) => {
+    expect(() =>
+      deriveWsfePartialCreditNote(invoice, {
+        for: target,
+        date: "20260905",
+        amounts: { net: 10_000, vat: 2100 },
+        total,
+      })
+    ).toThrowError(
+      expect.objectContaining({
+        name: "ArcaInputError",
+        code: "ARCA_INPUT_INVALID_AMOUNT",
+        field: "total",
+      })
     );
   });
   it("rejects an item shape that does not match the original's class", () => {

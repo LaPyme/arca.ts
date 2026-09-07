@@ -8,10 +8,14 @@ los términos de ARCA quedan como están en el código.
   de crédito.
 - [Habilitación en ARCA](./habilitacion-arca.md): CUIT, certificado, punto de
   venta y referencias oficiales.
-- [Facturas](./facturas.md): `issue()`, `preview()`, datos de la factura y
-  contrato fiscal de la fachada.
-- [Notas de crédito](./notas-de-credito.md): `issueCreditNote()`, modo parcial
-  y modo total.
+- [Facturas](./facturas.md): `issue()`, `preview()`, `recover()`, datos de la
+  factura —familias, tributos, FCE, desgloses revisados— y contrato fiscal de
+  la fachada.
+- [Notas de crédito](./notas-de-credito.md): `issueCreditNote()`,
+  `issueDebitNote()`, modo parcial, modo total, notas por período y vistas
+  previas.
+- [WSMTXCA](./wsmtxca.md): emisión con detalle de ítems por el segundo
+  servicio de CAE.
 - [Stores](./stores.md): Postgres, Redis, archivos, memoria, store propio y
   vida de los registros.
 - [Configuración](./configuracion.md): variables de entorno, opciones del
