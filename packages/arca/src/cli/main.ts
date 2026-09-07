@@ -10,6 +10,7 @@ import {
   parseSalesPoint,
   runCheck,
 } from "./check";
+import { describeUnknownError } from "./diagnose";
 import { type CliHelpTopic, renderHelp } from "./help";
 import { type InitFlags, runInit } from "./init";
 import { type IssueFlags, runIssue } from "./issue";
@@ -138,9 +139,21 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   return await runIssue(io, toIssueFlags(values, shared), writer, json);
 }
 
-/** Entry point used by `bin/facturas.mjs`. Sets the process exit code. */
-export async function main(argv: readonly string[] = process.argv.slice(2)) {
-  process.exitCode = await run(argv, createDefaultIo());
+/**
+ * Entry point used by `bin/facturas.mjs`. Sets the process exit code. Nothing
+ * reaches node's unhandled rejection handler from here: whatever a command
+ * failed to catch comes out as the SDK's safe message, never a stack or a PEM.
+ */
+export async function main(
+  argv: readonly string[] = process.argv.slice(2),
+  io: CliIo = createDefaultIo()
+) {
+  try {
+    process.exitCode = await run(argv, io);
+  } catch (error) {
+    io.stderr.write(`${describeUnknownError(error).diagnosis}\n`);
+    process.exitCode = CLI_EXIT.failed;
+  }
 }
 
 /** The real world: real streams, real env, the real SDK. */

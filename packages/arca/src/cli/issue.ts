@@ -2,11 +2,13 @@ import type { IssuedVoucher, IssueOutcome } from "../services/vouchers-types";
 import type { IssueInput } from "../services/wsfe-derive";
 import {
   type CheckFlags,
+  type CliCheckReport,
   parseSalesPoint,
   resolveCheckEnvironment,
   runCheckLayers,
   writeCheckReport,
 } from "./check";
+import { describeUnknownError } from "./diagnose";
 import { CLI_EXIT, type CliIo, type CliWriter } from "./output";
 import { ask, isInteractive } from "./prompt";
 
@@ -70,12 +72,50 @@ export async function runIssue(
   }
 
   const input = buildSmokeTestInput(parameters.issuer, parameters.salesPoint);
-  const outcome = await client.issue(input);
+  // The layers passed, so ARCA answered a moment ago; it can still fail on the
+  // next number or the authorization. That is a diagnosis like any other, not
+  // a stack trace, and with --json it still has to be one JSON object.
+  let outcome: IssueOutcome;
+  try {
+    outcome = await client.issue(input);
+  } catch (error) {
+    return writeIssueError(writer, report, error, json);
+  }
   if (json) {
     writer.json(outcome);
     return outcome.kind === "authorized" ? CLI_EXIT.ok : CLI_EXIT.failed;
   }
   return writeOutcome(writer, outcome, input);
+}
+
+/** The same safe message and code the check layers print, in both shapes. */
+function writeIssueError(
+  writer: CliWriter,
+  report: CliCheckReport,
+  error: unknown,
+  json: boolean
+): number {
+  const unknown = describeUnknownError(error);
+  if (json) {
+    writer.json({
+      ok: false,
+      ...(report.environment === undefined
+        ? {}
+        : { environment: report.environment }),
+      ...(report.taxId === undefined ? {} : { taxId: report.taxId }),
+      error: {
+        ...(unknown.code === undefined ? {} : { code: unknown.code }),
+        message: unknown.diagnosis,
+      },
+    });
+    return CLI_EXIT.failed;
+  }
+  writer.fail("emisión");
+  writer.note(unknown.diagnosis);
+  writer.note(
+    "No sabemos si ARCA llegó a autorizar; consultá el punto de venta antes de repetir."
+  );
+  return CLI_EXIT.failed;
 }
 
 function refuse(io: CliIo): number {

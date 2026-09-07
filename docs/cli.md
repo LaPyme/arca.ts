@@ -342,7 +342,18 @@ las que no llegó no aparecen.
 ```
 
 `issue --json` imprime el resultado tal como lo devuelve `issue()` del SDK, sin
-evidencia cruda.
+evidencia cruda. Si ARCA falla durante la emisión —entre la consulta del número
+y la autorización— sale un objeto con la misma forma que el de `check`, con el
+mensaje seguro y el código estable del SDK:
+
+```json
+{
+  "ok": false,
+  "environment": "test",
+  "taxId": "20123456786",
+  "error": { "code": "ARCA_SERVICE_ERROR", "message": "ARCA respondió con un error" }
+}
+```
 
 ## `issue`
 
@@ -379,6 +390,10 @@ Los otros tres resultados salen con código 1: `rejected` lista los errores de
 ARCA uno por línea, e `indeterminate` y `conflict` muestran el número y la
 evidencia con el consejo de
 [Inicio rápido](./inicio-rapido.md#5-tratá-todos-los-resultados).
+
+Si ARCA se cae después de que pasaron las capas, la emisión falla como una capa
+más —`✗ emisión` y el mensaje seguro del SDK— y también sale con código 1.
+Nunca sale una traza ni un PEM.
 
 ## Códigos de salida
 

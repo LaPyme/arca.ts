@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { PassThrough } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import packageJson from "../../package.json" with { type: "json" };
-import { createDefaultIo, run } from "./main";
+import { ArcaServiceError } from "../errors";
+import { createDefaultIo, main, run } from "./main";
 import {
   type CliIo,
   type CliOutputStream,
@@ -290,6 +291,48 @@ describe("createDefaultIo", () => {
         environment: "test",
       })
     ).toHaveProperty("login");
+  });
+});
+
+describe("main", () => {
+  const previous = process.exitCode;
+  afterEach(() => {
+    process.exitCode = previous;
+  });
+
+  it("sets the exit code the command returned", async () => {
+    const context = createContext();
+
+    await main(["frobnicate"], context.io);
+
+    expect(process.exitCode).toBe(2);
+  });
+
+  // Nothing must reach node's own unhandled error: it would print a stack and,
+  // with --json, no JSON at all.
+  it("catches whatever a command failed to catch", async () => {
+    const context = createContext();
+    context.io.stdout.write = () => {
+      throw new Error("el pipe se cerró");
+    };
+
+    await main(["--version"], context.io);
+
+    expect(process.exitCode).toBe(1);
+    expect(context.stderr()).toBe("el pipe se cerró\n");
+  });
+
+  it("prints the safe message of an SDK error, with no stack", async () => {
+    const context = createContext();
+    context.io.stdout.write = () => {
+      throw new ArcaServiceError("ARCA no responde");
+    };
+
+    await main(["--version"], context.io);
+
+    expect(process.exitCode).toBe(1);
+    expect(context.stderr()).toBe("ARCA no responde\n");
+    expect(context.stderr()).not.toContain("at ");
   });
 });
 

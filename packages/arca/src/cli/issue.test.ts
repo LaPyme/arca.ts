@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import forge from "node-forge";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArcaClient } from "../client";
-import { ArcaAuthenticationError } from "../errors";
+import { ArcaAuthenticationError, ArcaServiceError } from "../errors";
 import type { ArcaAuthCredentials } from "../internal/types";
 import type { IssueOutcome } from "../services/vouchers-types";
 import { buildSmokeTestInput, formatMinorUnits, runIssue } from "./issue";
@@ -190,6 +190,62 @@ describe("runIssue", () => {
     expect(context.issue).not.toHaveBeenCalled();
   });
 
+  // The layers pass, then WSFE falls over on the next number or the
+  // authorization. Before this was caught the rejection escaped runIssue and
+  // node printed its own unhandled error, with no report and no JSON.
+  it("reports a failed issue instead of throwing out of runIssue", async () => {
+    const context = createContext({
+      issueError: new ArcaServiceError("WSFE no responde"),
+    });
+
+    expect(await run(context, { salesPoint: 3, issuer: "monotributo" })).toBe(
+      1
+    );
+    expect(context.stdout()).toContain("✗ emisión");
+    expect(context.stdout()).toContain("WSFE no responde");
+    expect(context.stdout()).toContain("antes de repetir");
+  });
+
+  it("never prints a stack or a PEM for a failed issue", async () => {
+    const context = createContext({ issueError: new Error("boom") });
+
+    expect(await run(context, { salesPoint: 3, issuer: "monotributo" })).toBe(
+      1
+    );
+    expect(context.stdout()).toContain("boom");
+    expect(context.stdout()).not.toContain("BEGIN");
+    expect(context.stdout()).not.toContain("at ");
+  });
+
+  it("emits one JSON object for a failed issue", async () => {
+    const context = createContext({
+      issueError: new ArcaServiceError("WSFE no responde"),
+    });
+
+    expect(
+      await run(context, { salesPoint: 3, issuer: "monotributo" }, true)
+    ).toBe(1);
+    expect(JSON.parse(context.stdout())).toEqual({
+      ok: false,
+      environment: "test",
+      taxId: "20123456786",
+      error: { code: "ARCA_SERVICE_ERROR", message: "WSFE no responde" },
+    });
+  });
+
+  it("leaves out the code when the error has none", async () => {
+    const context = createContext({ issueError: new Error("se cortó la red") });
+
+    expect(
+      await run(context, { salesPoint: 3, issuer: "monotributo" }, true)
+    ).toBe(1);
+    expect(JSON.parse(context.stdout())).toMatchObject({
+      ok: false,
+      error: { message: "se cortó la red" },
+    });
+    expect(context.stdout()).not.toContain('"code"');
+  });
+
   it("runs the check layers first and stops when one fails", async () => {
     const context = createContext({
       salesPointsError: new ArcaAuthenticationError("rechazado", {
@@ -369,13 +425,14 @@ type TestContext = ReturnType<typeof createContext>;
 
 function run(
   context: TestContext,
-  flags: { salesPoint?: number; issuer?: string }
+  flags: { salesPoint?: number; issuer?: string },
+  json = false
 ) {
   return runIssue(
     context.io,
     flags,
     createWriter(context.io.stdout, { color: false }),
-    false
+    json
   );
 }
 
@@ -405,13 +462,17 @@ function createContext(options: {
   outcome?: IssueOutcome;
   salesPoints?: { number: number; blocked: string; emissionType: string }[];
   salesPointsError?: unknown;
+  /** What `client.issue` rejects with, once the layers have all passed. */
+  issueError?: unknown;
   tty?: boolean;
 }) {
   const out: string[] = [];
   const err: string[] = [];
   const prompted: string[] = [];
   const issue = vi.fn(() =>
-    Promise.resolve(options.outcome ?? (AUTHORIZED as IssueOutcome))
+    options.issueError === undefined
+      ? Promise.resolve(options.outcome ?? (AUTHORIZED as IssueOutcome))
+      : Promise.reject(options.issueError)
   );
   const context = {
     issue,
