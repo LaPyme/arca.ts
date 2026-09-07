@@ -16,6 +16,14 @@ propios.
 4. Empezá con `environment: "test"` y pasá a producción solo después de validar
    el flujo de punta a punta.
 
+## Con el CLI
+
+`npx facturas init` genera la clave y el CSR con el subject que pide el
+instructivo oficial, y después imprime a qué página entrar y qué botón tocar,
+tanto en homologación como en producción. Cuando tengas el certificado,
+`npx facturas check` prueba cada capa y nombra la que falta habilitar. Ninguno
+de los dos escribe en ARCA. Están en [CLI](./cli.md).
+
 ## Referencias oficiales
 
 - [Índice de documentación de facturación electrónica](https://www.arca.gob.ar/ws/documentacion/ws-factura-electronica.asp)

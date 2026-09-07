@@ -176,7 +176,9 @@ async function assertCliBinResolves() {
   const binPath = manifest.bin?.facturas;
 
   if (binPath === undefined) {
-    throw new Error("Expected facturas package.json to declare a facturas bin.");
+    throw new Error(
+      "Expected facturas package.json to declare a facturas bin."
+    );
   }
   if (!manifest.files?.includes("bin")) {
     throw new Error("Expected facturas package.json files to include bin.");

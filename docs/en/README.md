@@ -12,6 +12,13 @@ is a summary, not a translation.
 pnpm add facturas
 ```
 
+## Set up ARCA
+
+`npx facturas init` generates the private key and the CSR to upload in ARCA,
+then prints the exact pages and buttons. Once you have the certificate,
+`npx facturas check` tests every layer and names the one that fails. Neither
+writes to ARCA. See [cli.md](../cli.md).
+
 ## Issue an invoice
 
 Set `ARCA_TAX_ID`, `ARCA_CERTIFICATE_PEM`, `ARCA_PRIVATE_KEY_PEM` and
@@ -72,6 +79,7 @@ a stored reservation and never authorizes. See
 | Page | Topic |
 | --- | --- |
 | [inicio-rapido.md](../inicio-rapido.md) | Quick start |
+| [cli.md](../cli.md) | The `facturas` CLI: `init`, `check` and `issue` |
 | [facturas.md](../facturas.md) | `issue()`, `preview()`, invoice inputs, facade contract |
 | [notas-de-credito.md](../notas-de-credito.md) | `issueCreditNote()`, `issueDebitNote()` |
 | [wsmtxca.md](../wsmtxca.md) | Detailed WSMTXCA issuance through the facade |
