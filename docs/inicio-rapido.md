@@ -12,8 +12,9 @@ npx facturas init --cuit 20123456786 --env test
 ```
 
 Genera la clave privada y el CSR que se sube en ARCA, y después imprime los
-pasos exactos: qué página, qué botón y qué servicio autorizar. El paso a paso
-completo y las referencias oficiales están en
+pasos exactos: qué página, qué botón y qué servicio autorizar. Cuando ARCA te
+dé el certificado, guardalo en ese mismo directorio como `arca-test.crt`. El
+paso a paso completo y las referencias oficiales están en
 [Habilitación en ARCA](./habilitacion-arca.md); los comandos, en
 [CLI](./cli.md).
 
@@ -50,8 +51,10 @@ Antes de escribir código, confirmá las habilitaciones:
 npx facturas check
 ```
 
-Prueba las variables, el certificado, WSAA, WSFE y los puntos de venta en ese
-orden, y nombra la capa que falla con la página de ARCA que la arregla. No
+Prueba la configuración, el certificado, WSAA, WSFE y los puntos de venta en
+ese orden, y nombra la capa que falla con la página de ARCA que la arregla. No
+hace falta exportar nada para correrlo: si `arca-test.crt` y `arca-test.key`
+están en el directorio, los usa, y saca de ahí el entorno y el CUIT. No
 escribe nada en ARCA; sí guarda el ticket WSAA en el directorio temporal, para
 poder repetirse. La tabla completa de diagnósticos está en
 [CLI](./cli.md#diagnósticos).

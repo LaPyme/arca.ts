@@ -19,16 +19,41 @@ import {
 /** Every published row, asserted one by one. This is the contract. */
 const ROWS: [CliDiagnosisKey, string, string | undefined][] = [
   ["config.taxId", "Falta el CUIT.", "export ARCA_TAX_ID=20123456786"],
+  [
+    "config.taxIdUnknown",
+    "El certificado no dice de qué CUIT es.",
+    "Pasá --tax-id 20123456786 o definí ARCA_TAX_ID.",
+  ],
   ["config.environment", "Falta el entorno.", "export ARCA_ENVIRONMENT=test"],
   [
     "config.pem",
     "Falta el certificado o la clave.",
-    "Pasá --cert y --key, o definí ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM.",
+    "Guardá arca-<entorno>.crt y arca-<entorno>.key acá, o pasá --cert y --key, o definí las variables ARCA_*_PEM.",
+  ],
+  [
+    "config.files.ambiguous",
+    "Están {files} en este directorio y no sé cuál querés.",
+    "Elegí con --env test o --env production.",
+  ],
+  [
+    "config.files.missingCertificate",
+    "Está {file} pero falta {missingFile}.",
+    "Descargá el certificado de ARCA y guardalo acá como {missingFile}.",
+  ],
+  [
+    "config.files.missingKey",
+    "Está {file} pero falta {missingFile}.",
+    "Poné acá la clave con la que generaste el CSR, o pasá --key.",
   ],
   [
     "cert.invalid",
     "El archivo no es un PEM válido.",
     "Revisá que copiaste el bloque completo, con BEGIN y END.",
+  ],
+  [
+    "cert.taxIdMismatch",
+    "El certificado es del CUIT {certificateTaxId} y el configurado es {taxId}.",
+    "Usá el certificado de ese CUIT, o corregí --tax-id o ARCA_TAX_ID.",
   ],
   [
     "cert.mismatch",

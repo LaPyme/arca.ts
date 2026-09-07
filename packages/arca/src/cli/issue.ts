@@ -1,6 +1,11 @@
 import type { IssuedVoucher, IssueOutcome } from "../services/vouchers-types";
 import type { IssueInput } from "../services/wsfe-derive";
-import { type CheckFlags, runCheckLayers, writeCheckReport } from "./check";
+import {
+  type CheckFlags,
+  resolveCheckEnvironment,
+  runCheckLayers,
+  writeCheckReport,
+} from "./check";
 import { CLI_EXIT, type CliIo, type CliWriter } from "./output";
 import { ask, isInteractive } from "./prompt";
 
@@ -37,13 +42,12 @@ export async function runIssue(
   writer: CliWriter,
   json: boolean
 ): Promise<number> {
-  const environment =
-    flags.env?.trim().toLowerCase() || io.env.ARCA_ENVIRONMENT?.trim();
-  if (environment !== "test") {
-    io.stderr.write(
-      "issue solo emite en homologación. Cambiá ARCA_ENVIRONMENT=test.\n"
-    );
-    return CLI_EXIT.failed;
+  // Refuse before anything else when the environment is already known to be
+  // the wrong one. When nothing says which it is, the check layers run and
+  // name the real problem, and the guard below runs again on what they found.
+  const environment = resolveCheckEnvironment(io, flags);
+  if (environment !== undefined && environment !== "test") {
+    return refuse(io);
   }
 
   const parameters = await resolveIssueInput(io, flags);
@@ -60,6 +64,9 @@ export async function runIssue(
     }
     return CLI_EXIT.failed;
   }
+  if (report.environment !== "test") {
+    return refuse(io);
+  }
 
   const input = buildSmokeTestInput(parameters.issuer, parameters.salesPoint);
   const outcome = await client.issue(input);
@@ -68,6 +75,13 @@ export async function runIssue(
     return outcome.kind === "authorized" ? CLI_EXIT.ok : CLI_EXIT.failed;
   }
   return writeOutcome(writer, outcome, input);
+}
+
+function refuse(io: CliIo): number {
+  io.stderr.write(
+    "issue solo emite en homologación. Cambiá ARCA_ENVIRONMENT=test.\n"
+  );
+  return CLI_EXIT.failed;
 }
 
 async function resolveIssueInput(

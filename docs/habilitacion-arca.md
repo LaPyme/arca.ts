@@ -20,9 +20,11 @@ propios.
 
 `npx facturas init` genera la clave y el CSR con el subject que pide el
 instructivo oficial, y después imprime a qué página entrar y qué botón tocar,
-tanto en homologación como en producción. Cuando tengas el certificado,
-`npx facturas check` prueba cada capa y nombra la que falta habilitar. Ninguno
-de los dos escribe en ARCA. Están en [CLI](./cli.md).
+tanto en homologación como en producción. Guardá el certificado que te dé ARCA
+en ese directorio, con el nombre que `init` te indica (`arca-test.crt` o
+`arca-production.crt`), y `npx facturas check` lo encuentra solo: prueba cada
+capa y nombra la que falta habilitar, sin que tengas que exportar nada.
+Ninguno de los dos escribe en ARCA. Están en [CLI](./cli.md).
 
 ## Referencias oficiales
 

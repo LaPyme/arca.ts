@@ -27,8 +27,12 @@ import { type CheckFlags, runCheck } from "./check";
 import { type CliIo, type CliOutputStream, createWriter } from "./output";
 
 const NOW = new Date("2026-09-06T00:00:00Z");
-const VALID = createSelfSigned(new Date("2027-09-05T12:00:00Z"));
-const OTHER = createSelfSigned(new Date("2027-09-05T12:00:00Z"));
+const TAX_ID = "20123456786";
+const EXPIRES = new Date("2027-09-05T12:00:00Z");
+const VALID = createSelfSigned(EXPIRES);
+const OTHER = createSelfSigned(EXPIRES);
+const ANONYMOUS = createSelfSigned(EXPIRES, null);
+const SOMEONE_ELSE = createSelfSigned(EXPIRES, "33693450239");
 const EXPIRING = createSelfSigned(new Date("2026-09-16T00:00:00Z"));
 const EXPIRED = createSelfSigned(new Date("2026-01-31T00:00:00Z"));
 
@@ -52,7 +56,7 @@ describe("runCheck env layer", () => {
 
     expect(await run(context, {})).toBe(1);
     expect(context.stdout()).toMatchInlineSnapshot(`
-      "✗ variables de entorno
+      "✗ configuración
         Falta el CUIT.
         export ARCA_TAX_ID=20123456786
       "
@@ -81,7 +85,7 @@ describe("runCheck env layer", () => {
 
     expect(await run(context, {})).toBe(1);
     expect(context.stdout()).toMatchInlineSnapshot(`
-      "✗ variables de entorno
+      "✗ configuración
         CUIT inválido: 123 tiene 3 dígitos y necesita 11.
         Son 11 dígitos y el último es el verificador; podés escribirlo con guiones.
       "
@@ -157,6 +161,165 @@ describe("runCheck env layer", () => {
   });
 });
 
+describe("runCheck file discovery", () => {
+  it("finds the pair in the directory and reads the CUIT from the certificate", async () => {
+    const directory = directoryWith("test", VALID);
+    const context = createContext({ env: {}, cwd: directory, salesPoints: [] });
+
+    expect(await run(context, {})).toBe(0);
+    expect(context.stdout()).toContain(
+      "✓ configuración          arca-test.crt en este directorio, CUIT 20123456786 del certificado"
+    );
+  });
+
+  it("takes the environment from the file name", async () => {
+    const directory = directoryWith("production", VALID);
+    const context = createContext({
+      env: {},
+      cwd: directory,
+      salesPoints: [{ number: 3, blocked: "N", emissionType: "CAE" }],
+    });
+
+    await run(context, {});
+
+    expect(context.authOptions?.environment).toBe("production");
+    expect(context.stdout()).toContain(
+      "arca-production.crt en este directorio"
+    );
+  });
+
+  it("looks in --dir instead of the current directory", async () => {
+    const directory = directoryWith("test", VALID);
+    const context = createContext({
+      env: {},
+      cwd: tmpdir(),
+      salesPoints: [],
+    });
+
+    expect(await run(context, { dir: directory })).toBe(0);
+  });
+
+  it("asks for --env when both environments are on disk", async () => {
+    const directory = directoryWith("test", VALID);
+    writeFileSync(join(directory, "arca-production.crt"), VALID.certificatePem);
+    writeFileSync(join(directory, "arca-production.key"), VALID.privateKeyPem);
+    const context = createContext({ env: {}, cwd: directory });
+
+    expect(await run(context, {})).toBe(1);
+    expect(context.stdout()).toMatchInlineSnapshot(`
+      "✗ configuración
+        Están arca-test.crt y arca-production.crt en este directorio y no sé cuál querés.
+        Elegí con --env test o --env production.
+      "
+    `);
+  });
+
+  it("uses --env to choose between the two", async () => {
+    const directory = directoryWith("test", VALID);
+    writeFileSync(join(directory, "arca-production.crt"), VALID.certificatePem);
+    writeFileSync(join(directory, "arca-production.key"), VALID.privateKeyPem);
+    const context = createContext({ env: {}, cwd: directory, salesPoints: [] });
+
+    expect(await run(context, { env: "production" })).toBe(0);
+    expect(context.stdout()).toContain(
+      "arca-production.crt en este directorio, CUIT 20123456786 del certificado, --env=production"
+    );
+  });
+
+  it("says which half of the pair is missing, right after init", async () => {
+    const directory = createTemporaryDirectory();
+    writeFileSync(join(directory, "arca-test.key"), VALID.privateKeyPem);
+    const context = createContext({ env: {}, cwd: directory });
+
+    expect(await run(context, {})).toBe(1);
+    expect(context.stdout()).toMatchInlineSnapshot(`
+      "✗ configuración
+        Está arca-test.key pero falta arca-test.crt.
+        Descargá el certificado de ARCA y guardalo acá como arca-test.crt.
+      "
+    `);
+  });
+
+  it("says which half is missing when the key is the one that is gone", async () => {
+    const directory = createTemporaryDirectory();
+    writeFileSync(join(directory, "arca-test.crt"), VALID.certificatePem);
+    const context = createContext({ env: {}, cwd: directory });
+
+    expect(await run(context, {})).toBe(1);
+    expect(context.stdout()).toContain(
+      "Está arca-test.crt pero falta arca-test.key."
+    );
+    expect(context.stdout()).toContain("o pasá --key.");
+  });
+
+  it("prefers the environment variables over the files", async () => {
+    const directory = directoryWith("test", SOMEONE_ELSE);
+    const context = createContext({
+      env: fullEnv(),
+      cwd: directory,
+      salesPoints: [],
+    });
+
+    expect(await run(context, {})).toBe(0);
+    expect(context.stdout()).toContain(
+      "✓ configuración          ARCA_TAX_ID, ARCA_ENVIRONMENT=test"
+    );
+  });
+
+  it("prefers --cert and --key over the files", async () => {
+    const directory = directoryWith("test", SOMEONE_ELSE);
+    const certificate = join(directory, "otro.crt");
+    const key = join(directory, "otro.key");
+    writeFileSync(certificate, VALID.certificatePem);
+    writeFileSync(key, VALID.privateKeyPem);
+    const context = createContext({
+      env: { ARCA_ENVIRONMENT: "test" },
+      cwd: directory,
+      salesPoints: [],
+    });
+
+    expect(await run(context, { cert: certificate, key })).toBe(0);
+    expect(context.stdout()).toContain(
+      "--cert y --key, CUIT 20123456786 del certificado, ARCA_ENVIRONMENT=test"
+    );
+  });
+
+  it("asks for the CUIT when the certificate does not carry one", async () => {
+    const directory = directoryWith("test", ANONYMOUS);
+    const context = createContext({ env: {}, cwd: directory });
+
+    expect(await run(context, {})).toBe(1);
+    expect(context.stdout()).toContain(
+      "El certificado no dice de qué CUIT es."
+    );
+    expect(context.stdout()).toContain("Pasá --tax-id 20123456786");
+  });
+
+  it("takes the CUIT that was given over the one in the certificate", async () => {
+    const directory = directoryWith("test", ANONYMOUS);
+    const context = createContext({ env: {}, cwd: directory, salesPoints: [] });
+
+    expect(await run(context, { taxId: TAX_ID })).toBe(0);
+    expect(context.stdout()).toContain(
+      "arca-test.crt en este directorio, --tax-id"
+    );
+  });
+
+  it("stops when the given CUIT and the certificate's disagree", async () => {
+    const directory = directoryWith("test", SOMEONE_ELSE);
+    const context = createContext({ env: {}, cwd: directory });
+
+    expect(await run(context, { taxId: TAX_ID })).toBe(1);
+    expect(context.stdout()).toMatchInlineSnapshot(`
+      "✓ configuración          arca-test.crt en este directorio, --tax-id
+      ✗ certificado y clave
+        El certificado es del CUIT 33693450239 y el configurado es 20123456786.
+        Usá el certificado de ese CUIT, o corregí --tax-id o ARCA_TAX_ID.
+      "
+    `);
+  });
+});
+
 describe("runCheck certificate layer", () => {
   it("reports a PEM that does not parse", async () => {
     const context = createContext({
@@ -176,7 +339,7 @@ describe("runCheck certificate layer", () => {
 
     expect(await run(context, {})).toBe(1);
     expect(context.stdout()).toMatchInlineSnapshot(`
-      "✓ variables de entorno   ARCA_TAX_ID, ARCA_ENVIRONMENT=test
+      "✓ configuración          ARCA_TAX_ID, ARCA_ENVIRONMENT=test
       ✗ certificado y clave
         La clave privada no corresponde a este certificado.
         Usá la clave con la que generaste el CSR (arca-<entorno>.key).
@@ -341,7 +504,7 @@ describe("runCheck WSFE layer", () => {
 
     expect(await run(context, {})).toBe(1);
     expect(context.stdout()).toMatchInlineSnapshot(`
-      "✓ variables de entorno   ARCA_TAX_ID, ARCA_ENVIRONMENT=test
+      "✓ configuración          ARCA_TAX_ID, ARCA_ENVIRONMENT=test
       ✓ certificado y clave    coinciden, vence 2027-09-05
       ✓ WSAA                   ticket obtenido
       ✗ WSFE
@@ -411,7 +574,7 @@ describe("runCheck sales points layer", () => {
 
     expect(await run(context, {})).toBe(0);
     expect(context.stdout()).toMatchInlineSnapshot(`
-      "✓ variables de entorno   ARCA_TAX_ID, ARCA_ENVIRONMENT=test
+      "✓ configuración          ARCA_TAX_ID, ARCA_ENVIRONMENT=test
       ✓ certificado y clave    coinciden, vence 2027-09-05
       ✓ WSAA                   ticket obtenido
       ✓ WSFE                   servidor ok
@@ -520,7 +683,7 @@ describe("runCheck --json", () => {
       taxId: "20123456786",
       layers: [
         {
-          name: "env",
+          name: "config",
           ok: true,
           detail: "ARCA_TAX_ID, ARCA_ENVIRONMENT=test",
         },
@@ -606,6 +769,7 @@ function fullEnv(overrides: Record<string, string> = {}) {
 
 function createContext(options: {
   env: Record<string, string | undefined>;
+  cwd?: string;
   cacheDir?: string;
   loginError?: unknown;
   serverStatus?: { appServer: string; dbServer: string; authServer: string };
@@ -631,6 +795,7 @@ function createContext(options: {
   } as unknown as {
     login: typeof login;
     authOptions?: {
+      environment?: string;
       wsaaSessionStore?: {
         get(key: unknown): Promise<ArcaAuthCredentials | null>;
       };
@@ -650,7 +815,7 @@ function createContext(options: {
     stderr,
     stdin: new PassThrough(),
     env: options.env,
-    cwd: tmpdir(),
+    cwd: options.cwd ?? tmpdir(),
     cacheDir: options.cacheDir ?? createTemporaryDirectory(),
     now: () => NOW,
     createClient: (clientOptions) => {
@@ -705,22 +870,45 @@ function createContext(options: {
   return context;
 }
 
+/** A directory that looks like one where `init` ran and ARCA already answered. */
+function directoryWith(
+  environment: "test" | "production",
+  material: { certificatePem: string; privateKeyPem: string }
+): string {
+  const directory = createTemporaryDirectory();
+  writeFileSync(
+    join(directory, `arca-${environment}.crt`),
+    material.certificatePem
+  );
+  writeFileSync(
+    join(directory, `arca-${environment}.key`),
+    material.privateKeyPem
+  );
+  return directory;
+}
+
 function createTemporaryDirectory(): string {
   const directory = mkdtempSync(join(tmpdir(), "facturas-check-"));
   temporary.push(directory);
   return directory;
 }
 
-function createSelfSigned(notAfter: Date) {
+/** ARCA writes the CUIT in `serialNumber`; `taxId: null` is a foreign one. */
+function createSelfSigned(notAfter: Date, taxId: string | null = TAX_ID) {
   const keyPair = forge.pki.rsa.generateKeyPair({ bits: 2048, e: 0x01_00_01 });
   const certificate = forge.pki.createCertificate();
   certificate.publicKey = keyPair.publicKey;
   certificate.serialNumber = "01";
   certificate.validity.notBefore = new Date("2020-01-01T00:00:00Z");
   certificate.validity.notAfter = notAfter;
-  const attributes = [{ name: "commonName", value: "facturas" }];
+  const attributes = [
+    { name: "commonName", value: "facturas" },
+    ...(taxId === null
+      ? []
+      : [{ name: "serialNumber", value: `CUIT ${taxId}` }]),
+  ];
   certificate.setSubject(attributes);
-  certificate.setIssuer(attributes);
+  certificate.setIssuer([{ name: "commonName", value: "facturas" }]);
   certificate.sign(keyPair.privateKey, forge.md.sha256.create());
   return {
     certificatePem: forge.pki.certificateToPem(certificate),

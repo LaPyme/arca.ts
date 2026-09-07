@@ -2,6 +2,8 @@ import forge from "node-forge";
 
 const RSA_MODULUS_BITS = 2048;
 const RSA_PUBLIC_EXPONENT = 0x01_00_01;
+/** How ARCA writes the CUIT in the subject, with a literal space after `CUIT`. */
+const SUBJECT_TAX_ID = /^CUIT\s+(\d{11})$/;
 
 /** The distinguished name ARCA expects on a certificate signing request. */
 export type ArcaCsrSubject = {
@@ -23,6 +25,8 @@ export type ArcaCsrMaterial = {
 export type CertificateFacts = {
   notBefore: Date;
   notAfter: Date;
+  /** The CUIT in `serialNumber`, when ARCA wrote one there. */
+  taxId?: string;
 };
 
 /** Builds the subject in the order ARCA's manual writes it: C, O, CN, serialNumber. */
@@ -64,13 +68,32 @@ export function toPkcs8Pem(privateKey: forge.pki.rsa.PrivateKey): string {
   );
 }
 
-/** Reads the validity window of a certificate PEM. Throws on anything else. */
+/**
+ * Reads the validity window and the CUIT of a certificate PEM. Throws on
+ * anything that is not a certificate. ARCA issues against the CSR this CLI
+ * writes, so the CUIT comes back in `serialNumber` as `CUIT <11 dígitos>`;
+ * a certificate from somewhere else may carry nothing there.
+ */
 export function readCertificateFacts(certificatePem: string): CertificateFacts {
   const certificate = forge.pki.certificateFromPem(certificatePem);
+  const taxId = readSubjectTaxId(certificate);
   return {
     notBefore: certificate.validity.notBefore,
     notAfter: certificate.validity.notAfter,
+    ...(taxId === undefined ? {} : { taxId }),
   };
+}
+
+function readSubjectTaxId(
+  certificate: forge.pki.Certificate
+): string | undefined {
+  const field = certificate.subject.getField({ name: "serialNumber" }) as {
+    value?: unknown;
+  } | null;
+  if (typeof field?.value !== "string") {
+    return undefined;
+  }
+  return SUBJECT_TAX_ID.exec(field.value.trim())?.[1];
 }
 
 /**

@@ -26,9 +26,14 @@ export const ARCA_PAGES = {
 /** Keys of {@link CLI_DIAGNOSES}. One row of the published diagnosis table. */
 export type CliDiagnosisKey =
   | "config.taxId"
+  | "config.taxIdUnknown"
   | "config.environment"
   | "config.pem"
+  | "config.files.ambiguous"
+  | "config.files.missingCertificate"
+  | "config.files.missingKey"
   | "cert.invalid"
+  | "cert.taxIdMismatch"
   | "cert.mismatch"
   | "cert.expired"
   | "wsaa.certExpired"
@@ -54,10 +59,15 @@ export type CliDiagnosis = {
 
 /** Values substituted into the `{placeholders}` of a row. */
 export type CliDiagnosisValues = {
+  certificateTaxId?: string;
   date?: string;
+  file?: string;
+  files?: string;
   host?: string;
   message?: string;
+  missingFile?: string;
   salesPoint?: number;
+  taxId?: string;
 };
 
 /**
@@ -69,17 +79,38 @@ export const CLI_DIAGNOSES: Record<CliDiagnosisKey, CliDiagnosis> = {
     diagnosis: "Falta el CUIT.",
     fix: "export ARCA_TAX_ID=20123456786",
   },
+  "config.taxIdUnknown": {
+    diagnosis: "El certificado no dice de qué CUIT es.",
+    fix: "Pasá --tax-id 20123456786 o definí ARCA_TAX_ID.",
+  },
   "config.environment": {
     diagnosis: "Falta el entorno.",
     fix: "export ARCA_ENVIRONMENT=test",
   },
   "config.pem": {
     diagnosis: "Falta el certificado o la clave.",
-    fix: "Pasá --cert y --key, o definí ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM.",
+    fix: "Guardá arca-<entorno>.crt y arca-<entorno>.key acá, o pasá --cert y --key, o definí las variables ARCA_*_PEM.",
+  },
+  "config.files.ambiguous": {
+    diagnosis: "Están {files} en este directorio y no sé cuál querés.",
+    fix: "Elegí con --env test o --env production.",
+  },
+  "config.files.missingCertificate": {
+    diagnosis: "Está {file} pero falta {missingFile}.",
+    fix: "Descargá el certificado de ARCA y guardalo acá como {missingFile}.",
+  },
+  "config.files.missingKey": {
+    diagnosis: "Está {file} pero falta {missingFile}.",
+    fix: "Poné acá la clave con la que generaste el CSR, o pasá --key.",
   },
   "cert.invalid": {
     diagnosis: "El archivo no es un PEM válido.",
     fix: "Revisá que copiaste el bloque completo, con BEGIN y END.",
+  },
+  "cert.taxIdMismatch": {
+    diagnosis:
+      "El certificado es del CUIT {certificateTaxId} y el configurado es {taxId}.",
+    fix: "Usá el certificado de ese CUIT, o corregí --tax-id o ARCA_TAX_ID.",
   },
   "cert.mismatch": {
     diagnosis: "La clave privada no corresponde a este certificado.",
@@ -232,8 +263,11 @@ export function describeUnknownError(error: unknown): {
 }
 
 function fill(text: string, values: CliDiagnosisValues): string {
-  return text.replace(/\{(date|host|message|salesPoint)\}/g, (match, key) => {
-    const value = values[key as keyof CliDiagnosisValues];
-    return value === undefined ? match : String(value);
-  });
+  return text.replace(
+    /\{(certificateTaxId|date|file|files|host|message|missingFile|salesPoint|taxId)\}/g,
+    (match, key) => {
+      const value = values[key as keyof CliDiagnosisValues];
+      return value === undefined ? match : String(value);
+    }
+  );
 }

@@ -32,6 +32,11 @@ import {
   findSoapFault,
   findTransportError,
 } from "./diagnose";
+import {
+  type CredentialDiscovery,
+  type DiscoveredCredentials,
+  discoverCredentials,
+} from "./discover";
 import { CLI_EXIT, type CliIo, type CliWriter } from "./output";
 
 const EXPIRY_WARNING_DAYS = 30;
@@ -41,14 +46,14 @@ const MILLISECONDS_PER_DAY = 86_400_000;
 
 /** The five layers, in the order ARCA breaks them. */
 export type CliLayerName =
-  | "env"
+  | "config"
   | "certificate"
   | "wsaa"
   | "wsfe"
   | "salesPoints";
 
 const LAYER_LABELS: Record<CliLayerName, string> = {
-  env: "variables de entorno",
+  config: "configuración",
   certificate: "certificado y clave",
   wsaa: "WSAA",
   wsfe: "WSFE",
@@ -87,6 +92,8 @@ export type CheckFlags = {
   key?: string;
   taxId?: string;
   env?: string;
+  /** Where to look for `arca-<entorno>.crt` and `.key`. Defaults to the cwd. */
+  dir?: string;
   salesPoint?: number;
   /** Skips the ticket cache: one forced login, kept in memory only. */
   noCache?: boolean;
@@ -208,62 +215,197 @@ export function writeCheckReport(
   }
 }
 
+/**
+ * The environment `check` would use, found without touching ARCA: the flag,
+ * the variable, or the name of the pair sitting in the directory. `issue` asks
+ * first, because it refuses to write anywhere but homologación. `undefined`
+ * means nothing said so yet; the layers will name whatever is wrong.
+ */
+export function resolveCheckEnvironment(
+  io: CliIo,
+  flags: CheckFlags
+): string | undefined {
+  const chosen =
+    flags.env?.trim().toLowerCase() || io.env.ARCA_ENVIRONMENT?.trim();
+  if (chosen) {
+    return chosen;
+  }
+  if (flags.cert?.trim() || io.env.ARCA_CERTIFICATE_PEM?.trim()) {
+    return undefined;
+  }
+  try {
+    const discovery = discoverCredentials(resolveDirectory(io, flags.dir));
+    return discovery.kind === "found"
+      ? discovery.credentials.environment
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Where every value came from. Flags win, then the environment variables, then
+ * the files `init` left in the directory. The parts the line does not need are
+ * absent: when the environment comes from the file name, saying it twice adds
+ * nothing.
+ */
+type ConfigOrigin = {
+  credentials?: string;
+  taxId: string;
+  environment?: string;
+};
+
 function resolveConfigLayer(
   io: CliIo,
   flags: CheckFlags
 ): { layer: CliLayerReport; config?: ArcaClientConfig } {
-  const taxId = flags.taxId?.trim() || io.env.ARCA_TAX_ID?.trim();
-  if (!taxId) {
-    return { layer: failedLayer("env", diagnose("config.taxId")) };
-  }
-  const invalidTaxId = describeTaxIdProblem(taxId);
-  if (invalidTaxId !== undefined) {
-    return {
-      layer: failedLayer("env", { diagnosis: invalidTaxId, fix: TAX_ID_FIX }),
-    };
-  }
-
-  const environment =
+  const chosenEnvironment =
     flags.env?.trim().toLowerCase() || io.env.ARCA_ENVIRONMENT?.trim();
-  if (!environment) {
-    return { layer: failedLayer("env", diagnose("config.environment")) };
-  }
 
   let certificatePem: string | undefined;
   let privateKeyPem: string | undefined;
+  let discovery: CredentialDiscovery = { kind: "none" };
   try {
     certificatePem = readPem(io, flags.cert, io.env.ARCA_CERTIFICATE_PEM);
     privateKeyPem = readPem(io, flags.key, io.env.ARCA_PRIVATE_KEY_PEM);
+    if (!(certificatePem && privateKeyPem)) {
+      discovery = discoverCredentials(
+        resolveDirectory(io, flags.dir),
+        toEnvironment(chosenEnvironment)
+      );
+    }
   } catch (error) {
     const unknown = describeUnknownError(error);
     return {
-      layer: failedLayer("env", { diagnosis: unknown.diagnosis }, unknown.code),
+      layer: failedLayer(
+        "config",
+        { diagnosis: unknown.diagnosis },
+        unknown.code
+      ),
     };
   }
 
-  if (!(certificatePem && privateKeyPem)) {
-    return { layer: failedLayer("env", diagnose("config.pem")) };
+  const failure = describeDiscoveryFailure(discovery);
+  if (failure) {
+    return { layer: failedLayer("config", failure) };
+  }
+
+  const found = discovery.kind === "found" ? discovery.credentials : undefined;
+  const certificate = certificatePem || found?.certificatePem;
+  const privateKey = privateKeyPem || found?.privateKeyPem;
+
+  const taxId = resolveTaxId(io, flags, certificate);
+  if ("layer" in taxId) {
+    return { layer: taxId.layer };
+  }
+
+  const environment = chosenEnvironment || found?.environment;
+  if (!environment) {
+    return { layer: failedLayer("config", diagnose("config.environment")) };
+  }
+  if (!(certificate && privateKey)) {
+    return { layer: failedLayer("config", diagnose("config.pem")) };
   }
 
   try {
     const config = discoverArcaClientConfig({
-      taxId: normalizeTaxId(taxId),
-      certificatePem,
-      privateKeyPem,
+      taxId: taxId.taxId,
+      certificatePem: certificate,
+      privateKeyPem: privateKey,
       environment: environment as ArcaEnvironment,
     });
     assertArcaClientConfig(config);
     return {
       layer: {
-        name: "env",
+        name: "config",
         ok: true,
-        detail: describeSources(flags, config.environment),
+        detail: describeSources({
+          ...describeCredentialSource(flags, found),
+          taxId: taxId.source,
+          ...describeEnvironmentSource(io, flags, config.environment),
+        }),
       },
       config,
     };
   } catch (error) {
-    return { layer: failedLayer("env", toConfigDiagnosis(error)) };
+    return { layer: failedLayer("config", toConfigDiagnosis(error)) };
   }
+}
+
+/**
+ * The CUIT, in order: the flag, the variable, and last the `serialNumber` ARCA
+ * wrote in the certificate. Without any of the three there is nothing to ask
+ * ARCA about.
+ */
+function resolveTaxId(
+  io: CliIo,
+  flags: CheckFlags,
+  certificatePem: string | undefined
+): { taxId: string; source: string } | { layer: CliLayerReport } {
+  const given = flags.taxId?.trim() || io.env.ARCA_TAX_ID?.trim();
+  if (given) {
+    const problem = describeTaxIdProblem(given);
+    if (problem !== undefined) {
+      return {
+        layer: failedLayer("config", { diagnosis: problem, fix: TAX_ID_FIX }),
+      };
+    }
+    return {
+      taxId: normalizeTaxId(given),
+      source: flags.taxId?.trim() ? "--tax-id" : "ARCA_TAX_ID",
+    };
+  }
+  if (certificatePem === undefined) {
+    return { layer: failedLayer("config", diagnose("config.taxId")) };
+  }
+
+  const fromCertificate = readCertificateTaxId(certificatePem);
+  if (fromCertificate === undefined) {
+    return { layer: failedLayer("config", diagnose("config.taxIdUnknown")) };
+  }
+  return {
+    taxId: fromCertificate,
+    source: `CUIT ${fromCertificate} del certificado`,
+  };
+}
+
+/** The CUIT in the certificate, or nothing when the PEM does not even parse. */
+function readCertificateTaxId(certificatePem: string): string | undefined {
+  try {
+    return readCertificateFacts(certificatePem).taxId;
+  } catch {
+    // Layer 2 is where a PEM that does not parse gets its own row.
+    return undefined;
+  }
+}
+
+function describeDiscoveryFailure(
+  discovery: CredentialDiscovery
+): CliDiagnosis | undefined {
+  if (discovery.kind === "ambiguous") {
+    return diagnose("config.files.ambiguous", {
+      files: discovery.files.join(" y "),
+    });
+  }
+  if (discovery.kind === "incomplete") {
+    return diagnose(
+      discovery.missingKind === "certificate"
+        ? "config.files.missingCertificate"
+        : "config.files.missingKey",
+      { file: discovery.present, missingFile: discovery.missing }
+    );
+  }
+  return undefined;
+}
+
+function resolveDirectory(io: CliIo, directory: string | undefined): string {
+  return isAbsolute(directory ?? "")
+    ? (directory as string)
+    : resolve(io.cwd, directory ?? ".");
+}
+
+function toEnvironment(value: string | undefined): ArcaEnvironment | undefined {
+  return value === "test" || value === "production" ? value : undefined;
 }
 
 function readPem(
@@ -278,13 +420,43 @@ function readPem(
   return readFileSync(path, "utf8").trim();
 }
 
-function describeSources(
+/**
+ * Only a file is worth naming. PEMs that came from the environment are the
+ * default and stay unsaid, which keeps the old line for the old setup.
+ */
+function describeCredentialSource(
+  flags: CheckFlags,
+  found: DiscoveredCredentials | undefined
+): { credentials?: string } {
+  if (found !== undefined) {
+    return { credentials: `${found.certificateFile} en este directorio` };
+  }
+  const named = [
+    ...(flags.cert?.trim() ? ["--cert"] : []),
+    ...(flags.key?.trim() ? ["--key"] : []),
+  ];
+  return named.length === 0 ? {} : { credentials: named.join(" y ") };
+}
+
+/** The file name already says the environment, so nothing is added for it. */
+function describeEnvironmentSource(
+  io: CliIo,
   flags: CheckFlags,
   environment: ArcaEnvironment
-): string {
-  const taxIdSource = flags.taxId?.trim() ? "--tax-id" : "ARCA_TAX_ID";
-  const environmentSource = flags.env?.trim() ? "--env" : "ARCA_ENVIRONMENT";
-  return `${taxIdSource}, ${environmentSource}=${environment}`;
+): { environment?: string } {
+  if (flags.env?.trim()) {
+    return { environment: `--env=${environment}` };
+  }
+  if (io.env.ARCA_ENVIRONMENT?.trim()) {
+    return { environment: `ARCA_ENVIRONMENT=${environment}` };
+  }
+  return {};
+}
+
+function describeSources(origin: ConfigOrigin): string {
+  return [origin.credentials, origin.taxId, origin.environment]
+    .filter((part): part is string => part !== undefined)
+    .join(", ");
 }
 
 function toConfigDiagnosis(error: unknown): CliDiagnosis {
@@ -318,6 +490,18 @@ function checkCertificate(config: ArcaClientConfig, now: Date): CliLayerReport {
     );
   } catch {
     return failedLayer("certificate", diagnose("cert.invalid"));
+  }
+
+  // A certificate for another CUIT is a misconfiguration, not something ARCA
+  // forgives: WSAA answers for whoever the certificate belongs to.
+  if (facts.taxId !== undefined && facts.taxId !== config.taxId) {
+    return failedLayer(
+      "certificate",
+      diagnose("cert.taxIdMismatch", {
+        certificateTaxId: facts.taxId,
+        taxId: config.taxId,
+      })
+    );
   }
 
   const expiresAt = toIsoDate(facts.notAfter);

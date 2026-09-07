@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -76,6 +76,31 @@ describe("formatMinorUnits", () => {
 });
 
 describe("runIssue", () => {
+  it("takes homologación from the file names when nothing else says", async () => {
+    const directory = createTemporaryDirectory();
+    writeFileSync(join(directory, "arca-test.crt"), PAIR.certificatePem);
+    writeFileSync(join(directory, "arca-test.key"), PAIR.privateKeyPem);
+    const context = createContext({ bare: true, cwd: directory });
+
+    const code = await run(context, { salesPoint: 3, issuer: "monotributo" });
+
+    expect(code).toBe(0);
+    expect(context.issue).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses when the only pair in the directory is production", async () => {
+    const directory = createTemporaryDirectory();
+    writeFileSync(join(directory, "arca-production.crt"), PAIR.certificatePem);
+    writeFileSync(join(directory, "arca-production.key"), PAIR.privateKeyPem);
+    const context = createContext({ bare: true, cwd: directory });
+
+    const code = await run(context, { salesPoint: 3, issuer: "monotributo" });
+
+    expect(code).toBe(1);
+    expect(context.stderr()).toContain("issue solo emite en homologación.");
+    expect(context.issue).not.toHaveBeenCalled();
+  });
+
   it("refuses outside homologación", async () => {
     const context = createContext({ environment: "production" });
 
@@ -365,6 +390,9 @@ function stripCheck(printed: string): string {
 
 function createContext(options: {
   environment?: string;
+  /** With a directory the environment comes from the file names, not the env. */
+  cwd?: string;
+  bare?: boolean;
   outcome?: IssueOutcome;
   salesPoints?: { number: number; blocked: string; emissionType: string }[];
   salesPointsError?: unknown;
@@ -411,15 +439,17 @@ function createContext(options: {
     stdout,
     stderr,
     stdin,
-    env: {
-      ARCA_TAX_ID: "20123456786",
-      ARCA_CERTIFICATE_PEM: PAIR.certificatePem,
-      ARCA_PRIVATE_KEY_PEM: PAIR.privateKeyPem,
-      ...("environment" in options
-        ? { ARCA_ENVIRONMENT: options.environment }
-        : { ARCA_ENVIRONMENT: "test" }),
-    },
-    cwd: tmpdir(),
+    env: options.bare
+      ? {}
+      : {
+          ARCA_TAX_ID: "20123456786",
+          ARCA_CERTIFICATE_PEM: PAIR.certificatePem,
+          ARCA_PRIVATE_KEY_PEM: PAIR.privateKeyPem,
+          ...("environment" in options
+            ? { ARCA_ENVIRONMENT: options.environment }
+            : { ARCA_ENVIRONMENT: "test" }),
+        },
+    cwd: options.cwd ?? tmpdir(),
     cacheDir: createTemporaryDirectory(),
     now: () => new Date("2026-09-06T00:00:00Z"),
     createClient: (clientOptions) => {
@@ -477,9 +507,11 @@ function createSelfSigned() {
   certificate.serialNumber = "01";
   certificate.validity.notBefore = new Date("2020-01-01T00:00:00Z");
   certificate.validity.notAfter = new Date("2030-01-01T00:00:00Z");
-  const attributes = [{ name: "commonName", value: "facturas" }];
-  certificate.setSubject(attributes);
-  certificate.setIssuer(attributes);
+  certificate.setSubject([
+    { name: "commonName", value: "facturas" },
+    { name: "serialNumber", value: "CUIT 20123456786" },
+  ]);
+  certificate.setIssuer([{ name: "commonName", value: "facturas" }]);
   certificate.sign(keyPair.privateKey, forge.md.sha256.create());
   return {
     certificatePem: forge.pki.certificateToPem(certificate),

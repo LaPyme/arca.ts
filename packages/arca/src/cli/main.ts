@@ -45,6 +45,7 @@ const COMMAND_OPTIONS: Record<Command, OptionConfig> = {
     key: { type: "string" },
     "tax-id": { type: "string" },
     env: { type: "string" },
+    dir: { type: "string" },
     "sales-point": { type: "string" },
     "no-cache": { type: "boolean" },
   },
@@ -54,6 +55,7 @@ const COMMAND_OPTIONS: Record<Command, OptionConfig> = {
     key: { type: "string" },
     "tax-id": { type: "string" },
     env: { type: "string" },
+    dir: { type: "string" },
     "sales-point": { type: "string" },
     "no-cache": { type: "boolean" },
     issuer: { type: "string" },
@@ -189,6 +191,7 @@ function toCheckFlags(
     ...text(values, "key", "key"),
     ...text(values, "tax-id", "taxId"),
     ...text(values, "env", "env"),
+    ...text(values, "dir", "dir"),
     ...(salesPoint === undefined ? {} : { salesPoint }),
     ...(values["no-cache"] === true ? { noCache: true } : {}),
   };

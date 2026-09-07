@@ -108,11 +108,38 @@ Web Services` para responsable inscripto, y las opciones
 `Factura Electrónica – Exento en IVA – Web Services` para monotributo y exento.
 `Comprobantes en línea` es otro sistema y no sirve para web services.
 
+Y termina donde tenés que volver:
+
+```
+Cuando ARCA te dé el certificado, guardalo acá como arca-test.crt y corré:
+
+  $ npx facturas check
+```
+
+No hay ningún `export` que copiar: `check` encuentra el par de archivos en el
+directorio. Las variables de entorno son para tu aplicación, no para el CLI, y
+están en [Inicio rápido](./inicio-rapido.md#3-configurá-el-cliente).
+
 ## `check`
 
-Lee la configuración igual que `createArcaClient()`: variables de entorno
-primero, y los flags ganan. Prueba las capas en orden y para en la primera que
-falla.
+Prueba las capas en orden y para en la primera que falla. Después de `init`,
+con el certificado guardado al lado de la clave, no necesita nada más:
+
+```sh
+npx facturas check
+```
+
+```
+✓ configuración          arca-test.crt en este directorio, CUIT 20123456786 del certificado
+✓ certificado y clave    coinciden, vence 2027-09-05
+✓ WSAA                   ticket obtenido
+✓ WSFE                   servidor ok
+✓ puntos de venta        1 informado
+  3 (habilitado, CAE)
+```
+
+Las variables de entorno siguen funcionando igual, y son las que va a usar tu
+aplicación:
 
 ```sh
 export ARCA_TAX_ID=20123456786
@@ -123,13 +150,37 @@ npx facturas check
 ```
 
 ```
-✓ variables de entorno   ARCA_TAX_ID, ARCA_ENVIRONMENT=test
-✓ certificado y clave    coinciden, vence 2027-09-05
-✓ WSAA                   ticket obtenido
-✓ WSFE                   servidor ok
-✓ puntos de venta        1 informado
-  3 (habilitado, CAE)
+✓ configuración          ARCA_TAX_ID, ARCA_ENVIRONMENT=test
 ```
+
+### De dónde sale cada valor
+
+`check` e `issue` buscan en este orden, y el primero que responde gana:
+
+| # | Fuente | Qué aporta |
+| --- | --- | --- |
+| 1 | Los flags | `--tax-id`, `--env`, `--cert`, `--key` |
+| 2 | Las variables de entorno | `ARCA_TAX_ID`, `ARCA_ENVIRONMENT`, `ARCA_CERTIFICATE_PEM`, `ARCA_PRIVATE_KEY_PEM` |
+| 3 | Los archivos del directorio | `arca-<entorno>.crt` y `arca-<entorno>.key`, y con ellos el entorno y el CUIT |
+
+Los archivos son los que escribe `init`, con el nombre que `init` te dice que
+uses. La búsqueda es en el directorio actual, o en `--dir`. Reglas:
+
+- Si está **un solo par completo**, ese se usa, y el entorno sale del nombre
+  del archivo: `arca-test.crt` es homologación.
+- Si están **los dos pares**, el CLI no adivina: sale con código 1 y te pide
+  `--env test` o `--env production`.
+- Si está **medio par**, te dice cuál falta. Entre `init` y la respuesta de
+  ARCA vas a ver `Está arca-test.key pero falta arca-test.crt.`
+- El **CUIT** sale del `serialNumber` del certificado, donde ARCA lo escribe
+  como `CUIT <11 dígitos>`. Si el certificado no lo trae y tampoco lo pasaste,
+  el CLI te pide `--tax-id`. Si pasaste uno y el certificado dice otro, para:
+  es un certificado de otro contribuyente, y falla la capa
+  `certificado y clave` con los dos números a la vista.
+
+Esto es una comodidad del CLI y nada más. `createArcaClient()` no mira el
+disco: sigue leyendo variables de entorno, como explica
+[Configuración](./configuracion.md).
 
 | Flag | Qué hace |
 | --- | --- |
@@ -137,6 +188,7 @@ npx facturas check
 | `--key <archivo>` | Lee la clave PEM de un archivo, en vez de `ARCA_PRIVATE_KEY_PEM` |
 | `--tax-id <cuit>` | CUIT, en vez de `ARCA_TAX_ID` |
 | `--env <test\|production>` | Entorno, en vez de `ARCA_ENVIRONMENT` |
+| `--dir <directorio>` | Dónde buscar `arca-<entorno>.crt` y `.key` (por defecto, el actual) |
 | `--sales-point <n>` | Verifica ese punto de venta en particular |
 | `--no-cache` | No reusa ni guarda el ticket WSAA: un login forzado, solo en memoria |
 
@@ -144,7 +196,7 @@ Las capas, en orden:
 
 | # | Capa | Qué corre |
 | --- | --- | --- |
-| 1 | `variables de entorno` | Descubre y valida la configuración del cliente |
+| 1 | `configuración` | Resuelve flags, variables y archivos, y valida lo que salga |
 | 2 | `certificado y clave` | Parsea los dos PEM, verifica que la clave sea la del certificado y lee el vencimiento |
 | 3 | `WSAA` | Un login para el servicio `wsfe`. Reusa el ticket guardado si sigue vigente: la línea dice `ticket obtenido` o `ticket vigente` |
 | 4 | `WSFE` | `getServerStatus()` y después `getSalesPoints()` |
@@ -163,10 +215,15 @@ completa:
 
 | Capa | Caso | Diagnóstico | Solución |
 | --- | --- | --- | --- |
-| variables de entorno | falta `ARCA_TAX_ID` | Falta el CUIT. | `export ARCA_TAX_ID=20123456786` |
-| variables de entorno | `ARCA_TAX_ID` o `--tax-id` inválido | CUIT inválido: `<cuit>` tiene `<n>` dígitos y necesita 11. / CUIT inválido: `<cuit>` no pasa el dígito verificador. | Son 11 dígitos y el último es el verificador; podés escribirlo con guiones. |
-| variables de entorno | falta `ARCA_ENVIRONMENT` | Falta el entorno. | `export ARCA_ENVIRONMENT=test` |
-| variables de entorno | falta un PEM | Falta el certificado o la clave. | Pasá `--cert` y `--key`, o definí `ARCA_CERTIFICATE_PEM` y `ARCA_PRIVATE_KEY_PEM`. |
+| configuración | no hay CUIT en ningún lado | Falta el CUIT. | `export ARCA_TAX_ID=20123456786` |
+| configuración | `ARCA_TAX_ID` o `--tax-id` inválido | CUIT inválido: `<cuit>` tiene `<n>` dígitos y necesita 11. / CUIT inválido: `<cuit>` no pasa el dígito verificador. | Son 11 dígitos y el último es el verificador; podés escribirlo con guiones. |
+| configuración | el certificado no dice el CUIT | El certificado no dice de qué CUIT es. | Pasá `--tax-id 20123456786` o definí `ARCA_TAX_ID`. |
+| configuración | falta `ARCA_ENVIRONMENT` | Falta el entorno. | `export ARCA_ENVIRONMENT=test` |
+| configuración | falta un PEM | Falta el certificado o la clave. | Guardá `arca-<entorno>.crt` y `arca-<entorno>.key` acá, o pasá `--cert` y `--key`, o definí las variables `ARCA_*_PEM`. |
+| configuración | están los dos entornos en el directorio | Están `arca-test.crt` y `arca-production.crt` en este directorio y no sé cuál querés. | Elegí con `--env test` o `--env production`. |
+| configuración | está la clave y falta el certificado | Está `arca-test.key` pero falta `arca-test.crt`. | Descargá el certificado de ARCA y guardalo acá como `arca-test.crt`. |
+| configuración | está el certificado y falta la clave | Está `arca-test.crt` pero falta `arca-test.key`. | Poné acá la clave con la que generaste el CSR, o pasá `--key`. |
+| certificado y clave | el certificado es de otro CUIT | El certificado es del CUIT `<a>` y el configurado es `<b>`. | Usá el certificado de ese CUIT, o corregí `--tax-id` o `ARCA_TAX_ID`. |
 | certificado y clave | el PEM no parsea | El archivo no es un PEM válido. | Revisá que copiaste el bloque completo, con BEGIN y END. |
 | certificado y clave | la clave no es la del certificado | La clave privada no corresponde a este certificado. | Usá la clave con la que generaste el CSR (`arca-<entorno>.key`). |
 | certificado y clave | vencido | El certificado venció el `<fecha>`. | Generá un CSR nuevo con `npx facturas init` y renovalo en ARCA. |
@@ -199,7 +256,7 @@ las que no llegó no aparecen.
   "environment": "test",
   "taxId": "20123456786",
   "layers": [
-    { "name": "env", "ok": true, "detail": "ARCA_TAX_ID, ARCA_ENVIRONMENT=test" },
+    { "name": "config", "ok": true, "detail": "ARCA_TAX_ID, ARCA_ENVIRONMENT=test" },
     { "name": "certificate", "ok": true, "detail": "coinciden, vence 2027-09-05", "expiresAt": "2027-09-05" },
     { "name": "wsaa", "ok": true, "detail": "ticket vigente" },
     {
@@ -241,7 +298,7 @@ Esta es la llamada que hizo el CLI. Pegala en tu aplicación:
   });
 ```
 
-Acepta los flags de `check`, incluido `--no-cache`, más `--issuer`, con las
+Acepta los flags de `check`, incluidos `--dir` y `--no-cache`, más `--issuer`, con las
 cuatro condiciones de emisor: `monotributo`, `responsable_inscripto`, `exento` y `no_alcanzado`. En
 una terminal pregunta el punto de venta y el emisor si no los pasaste.
 

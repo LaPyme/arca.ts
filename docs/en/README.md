@@ -15,9 +15,10 @@ pnpm add facturas
 ## Set up ARCA
 
 `npx facturas init` generates the private key and the CSR to upload in ARCA,
-then prints the exact pages and buttons. Once you have the certificate,
-`npx facturas check` tests every layer and names the one that fails. Neither
-writes to ARCA. See [cli.md](../cli.md).
+then prints the exact pages and buttons. Save the certificate ARCA gives you
+next to the key, with the name `init` tells you, and `npx facturas check`
+finds it on its own: it tests every layer and names the one that fails.
+Neither writes to ARCA. See [cli.md](../cli.md).
 
 ## Issue an invoice
 

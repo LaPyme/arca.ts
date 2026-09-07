@@ -117,3 +117,43 @@ function createSelfSigned(notAfter = new Date("2030-01-01T00:00:00Z")) {
     privateKeyPem: forge.pki.privateKeyToPem(keyPair.privateKey),
   };
 }
+
+describe("readCertificateFacts taxId", () => {
+  /** ARCA signs the CSR this CLI writes, so the subject comes back verbatim. */
+  function issue(subject: forge.pki.CertificateField[]): string {
+    const keyPair = forge.pki.rsa.generateKeyPair({
+      bits: 2048,
+      e: 0x01_00_01,
+    });
+    const certificate = forge.pki.createCertificate();
+    certificate.publicKey = keyPair.publicKey;
+    certificate.serialNumber = "01";
+    certificate.validity.notBefore = new Date("2026-01-01T00:00:00Z");
+    certificate.validity.notAfter = new Date("2028-01-01T00:00:00Z");
+    certificate.setSubject(subject);
+    certificate.setIssuer([{ name: "commonName", value: "ARCA" }]);
+    certificate.sign(keyPair.privateKey, forge.md.sha256.create());
+    return forge.pki.certificateToPem(certificate);
+  }
+
+  it("reads the CUIT ARCA keeps in serialNumber", () => {
+    const pem = issue(buildArcaCsrSubject(SUBJECT));
+
+    expect(readCertificateFacts(pem).taxId).toBe("20123456786");
+  });
+
+  it("says nothing when the subject has no serialNumber", () => {
+    const pem = issue([{ name: "commonName", value: "facturas" }]);
+
+    expect(readCertificateFacts(pem).taxId).toBeUndefined();
+  });
+
+  it("says nothing when serialNumber is not a CUIT", () => {
+    const pem = issue([
+      { name: "commonName", value: "facturas" },
+      { name: "serialNumber", value: "12345" },
+    ]);
+
+    expect(readCertificateFacts(pem).taxId).toBeUndefined();
+  });
+});

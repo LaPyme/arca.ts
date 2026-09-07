@@ -74,14 +74,7 @@ export async function runInit(
     writer.ok(".gitignore", `agregué ${ignored.join(" y ")}`);
   }
 
-  writePlan(writer, {
-    alias,
-    certificateName,
-    csrName,
-    environment,
-    keyName,
-    taxId,
-  });
+  writePlan(writer, { alias, certificateName, csrName });
   return CLI_EXIT.ok;
 }
 
@@ -188,14 +181,7 @@ function appendToGitignore(directory: string): string[] {
 
 function writePlan(
   writer: CliWriter,
-  context: {
-    alias: string;
-    certificateName: string;
-    csrName: string;
-    environment: ArcaEnvironment;
-    keyName: string;
-    taxId: string;
-  }
+  context: { alias: string; certificateName: string; csrName: string }
 ): void {
   writer.blank();
   writer.line("Listo. Ahora en ARCA:");
@@ -220,13 +206,13 @@ function writePlan(
   );
   writer.line(`     con el alias ${context.alias}.`);
   writer.blank();
-  writer.line("Cuando tengas el certificado:");
-  writer.blank();
-  writer.line(`  export ARCA_TAX_ID=${context.taxId}`);
-  writer.line(`  export ARCA_ENVIRONMENT=${context.environment}`);
   writer.line(
-    `  export ARCA_CERTIFICATE_PEM="$(cat ${context.certificateName})"`
+    `Cuando ARCA te dé el certificado, guardalo acá como ${context.certificateName} y corré:`
   );
-  writer.line(`  export ARCA_PRIVATE_KEY_PEM="$(cat ${context.keyName})"`);
-  writer.line("  npx facturas check");
+  writer.blank();
+  writer.command("npx facturas check");
+  writer.blank();
+  writer.dim(
+    "Para tu app, las variables son ARCA_TAX_ID, ARCA_ENVIRONMENT, ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM; ver docs/inicio-rapido.md."
+  );
 }

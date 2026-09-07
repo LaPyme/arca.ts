@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import forge from "node-forge";
 import { afterEach, describe, expect, it } from "vitest";
 import { runInit } from "./init";
 import { type CliIo, type CliOutputStream, createWriter } from "./output";
@@ -53,13 +54,11 @@ describe("runInit", () => {
            Producción: Administrador de Relaciones → Nueva Relación → WebServices → Facturación Electrónica,
            con el alias facturas-test.
 
-      Cuando tengas el certificado:
+      Cuando ARCA te dé el certificado, guardalo acá como arca-test.crt y corré:
 
-        export ARCA_TAX_ID=20123456786
-        export ARCA_ENVIRONMENT=test
-        export ARCA_CERTIFICATE_PEM="$(cat arca-test.crt)"
-        export ARCA_PRIVATE_KEY_PEM="$(cat arca-test.key)"
-        npx facturas check
+        $ npx facturas check
+
+      Para tu app, las variables son ARCA_TAX_ID, ARCA_ENVIRONMENT, ARCA_CERTIFICATE_PEM y ARCA_PRIVATE_KEY_PEM; ver docs/inicio-rapido.md.
       "
     `);
   });
@@ -319,7 +318,7 @@ describe("runInit", () => {
   });
 
   it("accepts a CUIT written with hyphens and stores it without them", async () => {
-    const { io, directory, stdout } = createTestIo();
+    const { io, directory } = createTestIo();
 
     const code = await runInit(
       io,
@@ -328,9 +327,11 @@ describe("runInit", () => {
     );
 
     expect(code).toBe(0);
-    expect(stdout()).toContain("20123456786");
-    expect(readFileSync(join(directory, "arca-test.csr"), "utf8")).toContain(
-      "CERTIFICATE REQUEST"
+    const request = forge.pki.certificationRequestFromPem(
+      readFileSync(join(directory, "arca-test.csr"), "utf8")
+    );
+    expect(request.subject.getField({ name: "serialNumber" })?.value).toBe(
+      "CUIT 20123456786"
     );
   });
 

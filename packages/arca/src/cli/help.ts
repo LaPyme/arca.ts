@@ -108,8 +108,10 @@ const HELP_PAGES: Record<CliHelpTopic, HelpPage> = {
     ],
     notes: [
       "Escribe arca-<entorno>.key con permisos 0600 y arca-<entorno>.csr, y",
-      "nunca escribe en ARCA. En una terminal pregunta el CUIT y el entorno;",
-      "sin terminal, --cuit y --env son obligatorios.",
+      "nunca escribe en ARCA. Guardá el certificado que te dé ARCA en el mismo",
+      "directorio, como arca-<entorno>.crt, y check lo encuentra solo. En una",
+      "terminal pregunta el CUIT y el entorno; sin terminal, --cuit y --env",
+      "son obligatorios.",
     ],
   },
   check: {
@@ -136,6 +138,10 @@ const HELP_PAGES: Record<CliHelpTopic, HelpPage> = {
             description: "entorno, en lugar de ARCA_ENVIRONMENT",
           },
           {
+            name: "--dir <directorio>",
+            description: "dónde buscar los archivos (por defecto: el actual)",
+          },
+          {
             name: "--sales-point <n>",
             description: "punto de venta a verificar",
           },
@@ -155,9 +161,12 @@ const HELP_PAGES: Record<CliHelpTopic, HelpPage> = {
       "npx facturas check --cert arca-test.crt --key arca-test.key",
     ],
     notes: [
-      "Nunca escribe en ARCA: solo lee. Guarda el ticket WSAA en el directorio",
-      "temporal del sistema para poder repetirse, porque ARCA rechaza un segundo",
-      "login mientras hay uno vigente; --no-cache no lo lee ni lo escribe.",
+      "Busca cada valor en este orden: los flags, las variables de entorno y,",
+      "por último, arca-<entorno>.crt y arca-<entorno>.key en el directorio; de",
+      "ahí sale también el CUIT y el entorno. Nunca escribe en ARCA: solo lee.",
+      "Guarda el ticket WSAA en el directorio temporal del sistema para poder",
+      "repetirse, porque ARCA rechaza un segundo login mientras hay uno",
+      "vigente; --no-cache no lo lee ni lo escribe.",
     ],
   },
   issue: {
@@ -186,6 +195,10 @@ const HELP_PAGES: Record<CliHelpTopic, HelpPage> = {
             description: "entorno, en lugar de ARCA_ENVIRONMENT",
           },
           {
+            name: "--dir <directorio>",
+            description: "dónde buscar los archivos (por defecto: el actual)",
+          },
+          {
             name: "--no-cache",
             description: "no reusa ni guarda el ticket WSAA",
           },
@@ -202,8 +215,9 @@ const HELP_PAGES: Record<CliHelpTopic, HelpPage> = {
     notes: [
       "Las condiciones de emisor son monotributo, responsable_inscripto,",
       "exento y no_alcanzado. Emite un comprobante real de homologación y se",
-      "niega fuera de test: corre antes las capas de check y no sigue si alguna",
-      "falla. En una terminal pregunta el punto de venta y el emisor.",
+      "niega fuera de test: corre antes las capas de check, con la misma",
+      "búsqueda de configuración, y no sigue si alguna falla. En una terminal",
+      "pregunta el punto de venta y el emisor.",
     ],
   },
 };

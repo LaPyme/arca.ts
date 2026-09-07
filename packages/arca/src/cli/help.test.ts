@@ -72,8 +72,10 @@ describe("renderHelp without color", () => {
       Notas:
 
         Escribe arca-<entorno>.key con permisos 0600 y arca-<entorno>.csr, y
-        nunca escribe en ARCA. En una terminal pregunta el CUIT y el entorno;
-        sin terminal, --cuit y --env son obligatorios.
+        nunca escribe en ARCA. Guardá el certificado que te dé ARCA en el mismo
+        directorio, como arca-<entorno>.crt, y check lo encuentra solo. En una
+        terminal pregunta el CUIT y el entorno; sin terminal, --cuit y --env
+        son obligatorios.
       "
     `);
   });
@@ -92,6 +94,7 @@ describe("renderHelp without color", () => {
         --key <archivo>           clave privada PEM desde un archivo
         --tax-id <cuit>           CUIT, en lugar de ARCA_TAX_ID
         --env <test|production>   entorno, en lugar de ARCA_ENVIRONMENT
+        --dir <directorio>        dónde buscar los archivos (por defecto: el actual)
         --sales-point <n>         punto de venta a verificar
         --no-cache                no reusa ni guarda el ticket WSAA
         --json                    salida JSON
@@ -106,9 +109,12 @@ describe("renderHelp without color", () => {
 
       Notas:
 
-        Nunca escribe en ARCA: solo lee. Guarda el ticket WSAA en el directorio
-        temporal del sistema para poder repetirse, porque ARCA rechaza un segundo
-        login mientras hay uno vigente; --no-cache no lo lee ni lo escribe.
+        Busca cada valor en este orden: los flags, las variables de entorno y,
+        por último, arca-<entorno>.crt y arca-<entorno>.key en el directorio; de
+        ahí sale también el CUIT y el entorno. Nunca escribe en ARCA: solo lee.
+        Guarda el ticket WSAA en el directorio temporal del sistema para poder
+        repetirse, porque ARCA rechaza un segundo login mientras hay uno
+        vigente; --no-cache no lo lee ni lo escribe.
       "
     `);
   });
@@ -129,6 +135,7 @@ describe("renderHelp without color", () => {
         --key <archivo>           clave privada PEM desde un archivo
         --tax-id <cuit>           CUIT, en lugar de ARCA_TAX_ID
         --env <test|production>   entorno, en lugar de ARCA_ENVIRONMENT
+        --dir <directorio>        dónde buscar los archivos (por defecto: el actual)
         --no-cache                no reusa ni guarda el ticket WSAA
         --json                    salida JSON
         --no-color                sin colores
@@ -143,8 +150,9 @@ describe("renderHelp without color", () => {
 
         Las condiciones de emisor son monotributo, responsable_inscripto,
         exento y no_alcanzado. Emite un comprobante real de homologación y se
-        niega fuera de test: corre antes las capas de check y no sigue si alguna
-        falla. En una terminal pregunta el punto de venta y el emisor.
+        niega fuera de test: corre antes las capas de check, con la misma
+        búsqueda de configuración, y no sigue si alguna falla. En una terminal
+        pregunta el punto de venta y el emisor.
       "
     `);
   });
